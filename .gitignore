@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# 数据与中间产物（数据集与预计算走 Kaggle Dataset，不进 GitHub）
+*.nc
+*.npy
+*.npz
+data/
+memmap/
+
+# 训练与评估产物
+checkpoints/
+runs/
+results/
+outputs/
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
