@@ -36,6 +36,7 @@
 | 网格/时间 | 450×150，1501 步（dt=0.01，t∈[0,15]） |
 | 域 | x∈[-0.5,5.5]，y∈[-0.5,1.5]；u∈[-3.0,4.6]，v∈[-2.3,2.4] |
 | 质量 | 全量无 NaN；**41.8% 细胞近零速（每帧固定 28213 个）**= 静态固体几何（台阶管道壁面+圆柱+死区） |
+| 固体几何（票 02 实测） | 全帧取与（\|v\|<1e-5）后 **4 个连通块**：两块矩形壁面（x∈[2.5,5.5],y∈[-0.5,0.5] 与 x∈[-0.5,1.5],y∈[0.5,1.5]，接触域边界）+ **两个孤立圆柱**：入口 (≈0,0) 与拐角后管道 (≈3,1)，零速盘 43/45 格（圆角方块，等效半径≈0.047）；radius=0.0625 与 Re=160=U·D/ν（U=1, D=2r, ν=0.00078125）自洽；零速区为圆柱**内切区**（表面约 1 格厚格被插值为非零速），物理半径≈面积等效+1 格≈0.063 |
 | 坑 | netCDF4 的 C 库打不开中文路径（实测）；**h5py 可直接读中文路径** → 一律用 h5py。Kaggle 路径为 ASCII 无此问题 |
 
 ### 模型事实（`DeepUtils/models/segmentation/pathline_transformer.py`）
@@ -90,7 +91,7 @@ cylinder_vortex_pipeline/
 ```
 
 各模块职责（实现时逐条落实）：
-- **geometry.py**：|v|<ε 逐帧取与 → 连通域标记 → 输出 `mask.npy`（种子排除、迹线截断、IVD 置零共用）；圆柱 = 不与壁相连的孤立连通块；无障碍物数据集输出空掩膜，代码路径不变。**每个新数据集各自跑一遍**，掩膜随数据集的 (T,Y,X) 存储。
+- **geometry.py**：|v|<ε 逐帧取与 → 连通域标记 → 输出 `mask.npy`（种子排除、迹线截断、IVD 置零共用）+ `geometry_meta.json`（块统计与圆柱定位）；圆柱 = 不与壁相连的孤立连通块（无尺寸判据；pipedcylinder2d 实测 2 个：入口 (≈0,0) 与拐角后 (≈3,1)）；无障碍物数据集输出空掩膜，代码路径不变。**每个新数据集各自跑一遍**，掩膜随数据集的 (T,Y,X) 存储。
 - **extractor.py**：全局场积分（允许迹线离开 patch）；种子落固体 → 重播种（仿 C++ `JittorReSeeding`）；迹线入固体 → 截断并重复末点（不引入 -1000 毒值）；位置按 patch 归一化到 [-1,1]（可超界）。
 - **weak_labels.py**：中心差分 ω=∂v/∂x−∂u/∂y，IVD=|ω−5×5 邻域均值|；标签 = IVD(种子,t0)≥τ + 5×5 最小面积连通域过滤；固体区 IVD=0。
 - **dataset.py**：时间划分 train [0,10]s / val (10,12.5] / test (12.5,15]（帧 0-1000 / 1000-1250 / 1250-1500，无时间泄漏）；patch 32×32 stride 16，窗口 T_win=24 帧、起点步长 4 帧；每 epoch 40000 样本、50% 正样本过采样；u,v 与预计算 IVD 存 memmap（IVD 一次算好 ≈405MB）；返回 `((dummy_field, pathlines), labels)` 匹配模型输入；正样本 = patch 内存在 ≥1 条涡迹线。
@@ -178,4 +179,5 @@ cylinder_vortex_pipeline/
 - 2026-08-25 ask-matt 配置建立：运行 `/setup-matt-pocock-skills`，创建 `docs/agents/{issue-tracker,triage-labels,domain}.md` 与 `CLAUDE.md`（Local markdown tracker，五默认标签；仓库 URL 经用户确认定为 ziyixu317-wq 账号）。代码托管 GitHub `ziyixu317-wq/2d-vortex-extraction-260825`：初始 commit `5cf066c`（项目骨架）+ `a354652`（URL 修正）已推送，main 同步。**新环境事实（§2 之外）**：① 本机 git schannel 后端 + 本地代理 127.0.0.1:7890 有兼容性问题（`SEC_E_NO_CREDENTIALS`），推送须 `-c http.sslBackend=openssl`；② DSH 沙箱内 git 无法调用 GCM（signal pipe 限制）→ GitHub 认证类操作须用户在普通终端完成。未决问题：git 全局 user.email 为占位 `ziyi@example.com`（建议改为真实邮箱）；全局 sslBackend 是否改 openssl 待用户定（不改则每次推送带 `-c` 参数）。当前进度：仍为阶段 0 前，下一步按 §9 主线进入 `/to-spec`。
 - 2026-08-25 to-spec + to-tickets 完成：接缝经用户确认（三条全用、端到端为主验收缝）；规格发布 `.scratch/vortex-extraction-pipeline/spec.md`（Status: ready-for-agent）；10 张垂直切片票发布 `.scratch/vortex-extraction-pipeline/issues/01..10-*.md`（依赖：01,02 无阻塞可并行 → 03,04 依赖 02 → 05 依赖 03,04 → 06 依赖 01,05 → 07 依赖 06 → 08 依赖 07 → 09 依赖 08 → 10 依赖 09）。用户已确认拆分。未决：无。下一步：按 frontier 从 01、02 逐票 /implement（每票新上下文，内部 /tdd + /code-review）。
 - 2026-08-25 票 01（vendor 迁移）完成：`vendor/DeepUtils/` 落盘（models/loss 全树 + utils/{registry,ckpt_util,random}，38 文件 SHA256 与源逐字一致；仅 `utils/__init__.py` 重写剔除依赖 multimethod 的 config.py/EasyConfig）；项目根复制 LICENSE（Apache 2.0）与 NOTICE（PyFlowVis 署名）；新增 `tests/test_vendor_migration.py` 8 项验收测试全绿（导入缝、前向缝 (B,256)/(0,1)、迁移边界）；全项目不再引用 PyflowVis-main（阶段 0 判据达成）。/code-review 双轴处置：① 验收 2 守护测试曾逐字符迭代空洞通过 → 已改 AST 按 import 语句扫描（commit `1af7b7c` 前修复）；② "全树超最小子集"意见按 §4 目录树保留；③ 上游 `.cuda()` 硬编码（loss/build.py SmoothCrossEntropy、point_transformers.py PosE_Initial）为潜伏风险，已记 §7，不改迁移忠实性。下一步：票 02（geometry 掩膜）可并行启动。
+- 2026-08-25 票 02（geometry 掩膜）完成：新增 `geometry.py`（|v|<ε 逐帧取与 + 自写并查集连通域（无 scipy，遵守 §2 依赖清单）+ 块统计/圆柱定位 + `mask.npy` (T,Y,X) uint8 与 `geometry_meta.json` 落盘 + 物理坐标系目检图 + CLI）+ `tests/test_geometry.py` 10 项全绿（合成属性 + 真实数据已知事实；全量 18 passed）+ `pytest.ini`。**事实回写（§2 已加"固体几何（票 02 实测）"行，§4 职责行同步）**：数据集含**两个**圆柱（入口 (≈0,0) 与拐角后管道 (≈3,1)，零速盘 43/45 格）；radius=0.0625 与 Re=160=U·D/ν 自洽（元数据可信）；零速区为圆柱内切区（表面约 1 格厚格被插值为非零速），物理半径≈面积等效+1 格≈0.063。产物 `outputs/geometry/`（gitignore，走 Kaggle Dataset）。/code-review 双轴处置：① plot_mask 物理/格坐标混用（目检圆错位）→ extent 修复；② 测试期望值缺独立来源 → 实测事实按 §11 回写 HANDOFF §2 后成为权威来源；③ `min_block_cells` 曾扩展规格"圆柱=孤立块"定义 → 默认改 1（规格字面），保留为显式收紧选项；④ 死代码/assert 校验 → 清理（commit `7b3dcb9` 前修复）。未决：无阻塞。下一步：按 frontier 票 03（迹线提取，依赖 02）与 04（弱标签，依赖 02）可启动。
 - 未决问题：无阻塞性问题。τ 具体值、t_scale 取值、epoch 样本数待冒烟后定（§6 已给默认）。
