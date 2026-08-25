@@ -471,8 +471,9 @@ class TestRealData:
             for t0f, (py, px) in self.WINDOWS:
                 u_win = np.asarray(f["u"][t0f:t0f + 24], dtype=np.float32)
                 v_win = np.asarray(f["v"][t0f:t0f + 24], dtype=np.float32)
+                tdim_win = tdim[t0f:t0f + 24]        # 窗口切片配窗口 tdim（时变语义）
                 out = extractor.extract_pathlines(
-                    u_win, v_win, solid, None, xdim, ydim, tdim,
+                    u_win, v_win, solid, None, xdim, ydim, tdim_win,
                     patch_yx=(py, px), t0=float(tdim[t0f]), L=16,
                     rng=np.random.default_rng(t0f))
                 assert out.shape == (16, 256, 7), f"窗口 t0={t0f}"
@@ -488,7 +489,7 @@ class TestRealData:
             u_win = np.asarray(f["u"][t0f:t0f + 24], dtype=np.float32)
             v_win = np.asarray(f["v"][t0f:t0f + 24], dtype=np.float32)
         _, seeds = extractor.extract_pathlines(
-            u_win, v_win, solid, None, xdim, ydim, tdim,
+            u_win, v_win, solid, None, xdim, ydim, tdim[t0f:t0f + 24],
             patch_yx=(py, px), t0=float(tdim[t0f]), L=16,
             rng=np.random.default_rng(t0f), return_seeds=True)
         assert seeds.shape == (256, 2)
@@ -507,7 +508,7 @@ class TestRealData:
             u_win = np.asarray(f["u"][t0f:t0f + 24], dtype=np.float32)
             v_win = np.asarray(f["v"][t0f:t0f + 24], dtype=np.float32)
         out = extractor.extract_pathlines(
-            u_win, v_win, solid, None, xdim, ydim, tdim,
+            u_win, v_win, solid, None, xdim, ydim, tdim[t0f:t0f + 24],
             patch_yx=(py, px), t0=float(tdim[t0f]), L=16,
             rng=np.random.default_rng(t0f))
         geo = extractor.patch_geometry((py, px), (32, 32), xdim, ydim)
@@ -575,3 +576,187 @@ class TestSeedingGrid:
         assert b[1] < cy < d[1]            # 上下卫星（y 轴对）
         assert a[1] == c[1] == cy          # 左右卫星 y = 组中心 y
         assert b[0] == d[0] == cx          # 上下卫星 x = 组中心 x
+
+
+# ================================================================ 切片 7：向量化批量提取（票 05）
+
+class TestExtractPathlinesBatched:
+    """extract_pathlines_batched：向量化批量积分（256 条同时），供 dataset.py 的
+    on-the-fly 样本生成（验收：单样本 <5ms）。与逐条 extract_pathlines 必须
+    逐元素一致（同一公式、同一 rng 消费顺序）——一致性守护测试防双份漂移。"""
+
+    @staticmethod
+    def _run_both(u, v, mask, xdim, ydim, tdim, patch, rng_seed=0, **kw):
+        """同一输入分别用标量/向量化提取，返回 (scalar_out, batched_out,
+        scalar_seeds, batched_seeds)。"""
+        rng_s = np.random.default_rng(rng_seed)
+        rng_b = np.random.default_rng(rng_seed)
+        s_out, s_seeds = extractor.extract_pathlines(
+            u, v, mask, None, xdim, ydim, tdim, patch_yx=patch, t0=0.0, L=16,
+            rng=rng_s, return_seeds=True, **kw)
+        b_out = extractor.extract_pathlines_batched(
+            u, v, mask, None, xdim, ydim, tdim, patch_yx=patch, t0=0.0, L=16,
+            rng=rng_b, return_seeds=True, **kw)
+        if isinstance(b_out, tuple):
+            b_out, b_seeds = b_out
+        else:
+            b_seeds = extractor.seeding_grid(patch, (32, 32), xdim, ydim)
+        return s_out, b_out, s_seeds, b_seeds
+
+    def test_batched_matches_scalar_clean_flow(self):
+        """无固体、无截断（干净流场）：批量与逐条输出逐元素一致（含种子）。"""
+        Y, X, T = 40, 150, 40
+        xdim = np.linspace(-2.0, 3.0, X)
+        u = np.full((T, Y, X), 0.6, dtype=np.float32)
+        v = np.zeros((T, Y, X), dtype=np.float32)
+        _, ydim, tdim = grid(Y, X, T, 0.1)
+        s_out, b_out, s_seeds, b_seeds = self._run_both(u, v, None, xdim, ydim, tdim, (4, 14))
+        assert b_out.shape == (16, 256, 7) and np.isfinite(b_out).all()
+        assert s_out == pytest.approx(b_out, abs=1e-5)
+        assert s_seeds == pytest.approx(b_seeds, abs=1e-12)
+
+    def test_batched_time_varying_not_frozen(self):
+        """时变语义守护（Spec 轴审查修复点回归）：窗口切片场配**窗口 tdim** →
+        u 通道随输出步演化（非冻结在窗口末帧）；且批量与逐条在该窗口下一致。
+        反向错配（窗口场配全场 tdim）曾使时间映射 clamp 到窗口末帧（时变冻结）。"""
+        T = 24
+        dt = 0.1
+        Y, X = 40, 60
+        xdim, ydim, tdim = grid(Y, X, T, dt)
+        tt, _yy, _xx = np.meshgrid(tdim, ydim, xdim, indexing="ij")
+        u = (0.2 + 0.2 * tt).astype(np.float32)      # 时变：u(t) = 0.2 + 0.2t（弱速不出域）
+        v = np.zeros((T, Y, X), dtype=np.float32)
+        rng_s = np.random.default_rng(5)
+        rng_b = np.random.default_rng(5)
+        s_out = extractor.extract_pathlines(
+            u, v, None, None, xdim, ydim, tdim, patch_yx=(4, 14), t0=0.0, L=16,
+            rng=rng_s, return_seeds=False)
+        b_out = extractor.extract_pathlines_batched(
+            u, v, None, None, xdim, ydim, tdim, patch_yx=(4, 14), t0=0.0, L=16,
+            rng=5, return_seeds=False)
+        assert s_out == pytest.approx(b_out, abs=1e-5)      # 窗口口径下逐元素一致
+        # CH_U 沿 CH_T 演化：末步 u ≈ 0.2 + 0.2×（窗口末 t）>> 首步 u ≈ 0.2
+        ts = s_out[:, 0, extractor.CH_T]
+        us = s_out[:, 0, extractor.CH_U]
+        assert us[np.argmax(ts)] > us[0] + 0.05
+        assert np.all(np.diff(us) >= -1e-7)                 # 单调（截断末点重复 → 0 差）
+
+    def test_interp_pair_matches_scalar_trilinear(self):
+        """批量插值内核与标量 trilinear_interp 同公式守护：随机点（含越界）
+        在同步时间（批量积分器的场景：所有迹线同一时刻）下逐点一致；
+        非同步时间显式拒绝（防静默错值）。"""
+        Y, X, T = 12, 18, 5
+        xdim, ydim, tdim = grid(Y, X, T)
+        rng = np.random.default_rng(11)
+        u = rng.standard_normal((T, Y, X)).astype(np.float32)
+        v = rng.standard_normal((T, Y, X)).astype(np.float32)
+        pts = rng.uniform(-1.5, 1.5, size=(40, 2))
+        ts = np.full(40, 0.35)                     # 同步时间（批量积分器场景）
+        uu, vv = extractor._interp_pair(u, v, pts[:, 0], pts[:, 1], ts, xdim, ydim, tdim)
+        for j, ((x, y), t) in enumerate(zip(pts, ts)):
+            assert uu[j] == pytest.approx(
+                extractor.trilinear_interp(u, x, y, t, xdim, ydim, tdim), abs=1e-6)
+            assert vv[j] == pytest.approx(
+                extractor.trilinear_interp(v, x, y, t, xdim, ydim, tdim), abs=1e-6)
+        with pytest.raises(ValueError):
+            extractor._interp_pair(u, v, pts[:, 0], pts[:, 1],
+                                   rng.uniform(-0.2, 0.8, size=40), xdim, ydim, tdim)
+
+    def test_batched_matches_scalar_truncation(self):
+        """截断分支（无重播种/无重试，确定性路径）：固体条带在种子行进路径上
+        → 批量与逐条输出逐元素一致（防批量积分器公式漂移）。"""
+        Y, X, T = 40, 150, 40
+        xdim = np.linspace(-2.0, 3.0, X)
+        u = np.full((T, Y, X), 1.0, dtype=np.float32)
+        v = np.zeros((T, Y, X), dtype=np.float32)
+        _, ydim, tdim = grid(Y, X, T, 0.1)
+        mask = np.zeros((Y, X), dtype=bool)
+        mask[0:32, 40:46] = True                    # 条带在 patch (0,0) 右侧（种子全流体）
+        s_out, b_out, s_seeds, b_seeds = self._run_both(u, v, mask, xdim, ydim, tdim, (0, 0))
+        assert s_out == pytest.approx(b_out, abs=1e-5)
+        assert s_seeds == pytest.approx(b_seeds, abs=1e-12)
+        # 截断确实发生（末两步重复）且批量无 -1000 毒值
+        assert any((b_out[-1, k, CH_PX] == b_out[-2, k, CH_PX]).any() for k in range(256))
+        assert not (b_out == -1000.0).any()
+        assert np.isfinite(b_out).all()
+
+    def test_batched_with_solid_reseed_valid(self):
+        """重播种分支（随机路径）：批量版种子全部不在固体、输出有限无 -1000；
+        同 rng 两次调用输出一致（per-k 派生可复现）。"""
+        Y, X, T = 40, 150, 40
+        xdim = np.linspace(-2.0, 3.0, X)
+        u = np.full((T, Y, X), 0.6, dtype=np.float32)
+        v = np.zeros((T, Y, X), dtype=np.float32)
+        _, ydim, tdim = grid(Y, X, T, 0.1)
+        mask = _solid_disk_mask(Y, X, cy=16, cx=28, r=6)
+        b_out, b_seeds = extractor.extract_pathlines_batched(
+            u, v, mask, None, xdim, ydim, tdim, patch_yx=(0, 20), t0=0.0, L=16,
+            rng=0, return_seeds=True)
+        b_out2, b_seeds2 = extractor.extract_pathlines_batched(
+            u, v, mask, None, xdim, ydim, tdim, patch_yx=(0, 20), t0=0.0, L=16,
+            rng=0, return_seeds=True)
+        assert b_out == pytest.approx(b_out2, abs=0.0)      # 严格复现
+        assert b_seeds == pytest.approx(b_seeds2, abs=0.0)
+        assert b_out.shape == (16, 256, 7) and np.isfinite(b_out).all()
+        assert not (b_out == -1000.0).any()
+        for k in range(256):
+            assert not extractor.mask_at(mask, b_seeds[k, 0], b_seeds[k, 1], xdim, ydim), \
+                f"迹线 {k} 种子仍在固体（批量重播种未生效）"
+
+    def test_batched_short_retry_valid(self):
+        """短迹线重试分支（随机路径）：高速流 + 固体条带 → 无静止退化迹线
+        （重试兜底生效）、无 NaN、无 -1000、种子不在固体。"""
+        Y, X, T = 40, 150, 40
+        xdim = np.linspace(-2.0, 3.0, X)
+        u = np.full((T, Y, X), 1.0, dtype=np.float32)
+        v = np.zeros((T, Y, X), dtype=np.float32)
+        _, ydim, tdim = grid(Y, X, T, 0.1)
+        mask = np.zeros((Y, X), dtype=bool)
+        mask[0:32, 28:34] = True
+        b_out, b_seeds = extractor.extract_pathlines_batched(
+            u, v, mask, None, xdim, ydim, tdim, patch_yx=(0, 20), t0=0.0, L=16,
+            rng=1, return_seeds=True)
+        assert np.isfinite(b_out).all() and not (b_out == -1000.0).any()
+        for k in range(256):
+            assert not extractor.mask_at(mask, b_seeds[k, 0], b_seeds[k, 1], xdim, ydim)
+            assert b_out[-1, k, CH_PX] > b_out[0, k, CH_PX], f"迹线 {k} 静止退化（重试未兜底）"
+
+    def test_batched_with_ivd_channel(self):
+        """ivd 通道插值：批量与逐条一致（ivd 场影响 CH_IVD 通道）。"""
+        Y, X, T = 48, 96, 40
+        xdim = np.linspace(-1.0, 1.0, X)
+        ydim = np.linspace(-1.0, 1.0, Y)
+        tdim = np.linspace(0.0, 0.5, T)
+        tt, yy, xx = np.meshgrid(tdim, ydim, xdim, indexing="ij")
+        ivd = (np.sin(3 * xx) + np.cos(3 * yy)).astype(np.float32)
+        u = np.full((T, Y, X), 0.3, dtype=np.float32)
+        v = np.zeros((T, Y, X), dtype=np.float32)
+        rng_s = np.random.default_rng(3)
+        rng_b = np.random.default_rng(3)
+        s_out = extractor.extract_pathlines(
+            u, v, None, ivd, xdim, ydim, tdim, patch_yx=(8, 32), t0=0.0, L=16,
+            rng=rng_s, return_seeds=False)
+        b_out = extractor.extract_pathlines_batched(
+            u, v, None, ivd, xdim, ydim, tdim, patch_yx=(8, 32), t0=0.0, L=16,
+            rng=rng_b, return_seeds=False)
+        assert s_out == pytest.approx(b_out, abs=1e-5)
+
+    def test_batched_shape_finite_real_alike(self):
+        """形状/有限性属性（真实数据同口径网格大小）：(L,256,7) float32、
+        无 NaN、无 -1000；种子全部不在固体（重播种生效）。"""
+        Y, X, T = 48, 96, 40
+        xdim = np.linspace(-1.0, 1.0, X)
+        ydim = np.linspace(-1.0, 1.0, Y)
+        tdim = np.linspace(0.0, 0.5, T)
+        u = np.full((T, Y, X), 0.2, dtype=np.float32)
+        v = np.zeros((T, Y, X), dtype=np.float32)
+        mask = _solid_disk_mask(Y, X, cy=24, cx=48, r=7)
+        b_out, b_seeds = extractor.extract_pathlines_batched(
+            u, v, mask, None, xdim, ydim, tdim, patch_yx=(0, 16), t0=0.0, L=16,
+            rng=np.random.default_rng(0), return_seeds=True)
+        assert b_out.shape == (16, 256, 7) and b_out.dtype == np.float32
+        assert np.isfinite(b_out).all() and not (b_out == -1000.0).any()
+        assert b_seeds.shape == (256, 2)
+        for k in range(256):
+            assert not extractor.mask_at(mask, b_seeds[k, 0], b_seeds[k, 1], xdim, ydim), \
+                f"迹线 {k} 种子仍在固体（批量重播种未生效）"

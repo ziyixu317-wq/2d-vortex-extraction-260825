@@ -222,15 +222,57 @@ def build_label_field(ivd, mask2d, taus, slices, min_area=DEFAULT_MIN_AREA):
 
 # --------------------------------------------------------------------------- 正样本占比（支撑过采样）
 
+def patch_seed_offsets(patch_size=(32, 32), xdim=None, ydim=None,
+                       groups=(8, 8), delta_frac=0.05):
+    """256 种子相对 patch 原点 (0,0) 的格偏移 (off_y, off_x)，各 (K,) intp。
+
+    种子 → 最近格（extractor.nearest_cell 单一公式：四舍五入 floor(g+0.5)，
+    与 mask_at 同口径）；网格等距故偏移与 patch 绝对位置无关。正样本判定
+    （patch_positive_map）与数据集池构建（票 05：不可用 patch 排除）共用该
+    单一公式，防双份漂移。
+    """
+    seeds = extractor.seeding_grid((0, 0), patch_size, xdim, ydim,
+                                   groups, delta_frac)
+    ph, pw = patch_size
+    off_y, off_x = extractor.nearest_cell(seeds[:, 0], seeds[:, 1], xdim, ydim)
+    off_y = np.clip(off_y, 0, ph - 1)
+    off_x = np.clip(off_x, 0, pw - 1)
+    return off_y, off_x
+
+
+def patch_positive_map(label2d, xdim, ydim, patch_size=(32, 32),
+                       stride=(16, 16), groups=(8, 8), delta_frac=0.05):
+    """单帧 → (nY, nX) bool：各 patch 位置是否存在 ≥1 条涡迹线（HANDOFF §4 口径）。
+
+    涡迹线判据 = 种子（64 组 × 4 轴向卫星，与 extractor.seeding_grid 单一公式）
+    处标签为 1；固体区标签恒 0（build_label_field 强制）→ 落固体的种子不计正。
+    正样本占比统计（positive_patch_fraction）与数据集样本池（票 05）共用此函数，
+    防判据双份漂移。返回值 (nY, nX) 与 patch_locations 同序（y 外 x 内）。
+    """
+    lab = np.asarray(label2d, dtype=bool)
+    if lab.ndim != 2:
+        raise ValueError(f"标签为单帧 (Y,X)，实际 {lab.shape}")
+    ph, pw = patch_size
+    sy, sx = stride
+    off_y, off_x = patch_seed_offsets(patch_size, xdim, ydim, groups, delta_frac)
+    H, W = lab.shape
+    if H < ph or W < pw:
+        raise ValueError(f"帧尺寸 {lab.shape} 小于 patch {patch_size}")
+    ys = np.arange(0, H - ph + 1, sy)
+    xs = np.arange(0, W - pw + 1, sx)
+    seed_y = ys[:, None, None] + off_y[None, None, :]
+    seed_x = xs[None, :, None] + off_x[None, None, :]
+    return lab[seed_y, seed_x].any(axis=-1)
+
+
 def positive_patch_fraction(label_tyx, xdim, ydim, patch_size=(32, 32),
                             stride=(16, 16), frame_indices=None,
                             groups=(8, 8), delta_frac=0.05):
     """正样本占比统计：正样本 = patch 内存在 ≥1 条涡迹线（HANDOFF §4 dataset 口径）。
 
-    涡迹线判据 = 种子（64 组 × 4 轴向卫星，与 extractor.seeding_grid 单一公式）
-    处标签为 1；固体区标签恒 0（build_label_field 强制）→ 落固体的种子不计正。
-    近似说明：种子落固体时未做重播种（extractor.reseed 含随机性），重播种后可能
-    为正的极小情形被忽略——统计对此低估 ≤2%（固体种子占比 × 正区比例），对
+    与 patch_positive_map 共享判据（单一公式）；近似说明见 patch_positive_map：
+    种子落固体时未做重播种（extractor.reseed 含随机性），重播种后可能为正的
+    极小情形被忽略——统计对此低估 ≤2%（固体种子占比 × 正区比例），对
     过采样设计（0.5/占比）无实质影响（此边界已在完成记录中披露）。
 
     统计帧由 frame_indices 显式给定（HANDOFF §6：窗口起点步长 4 帧；None = 全部帧，
@@ -241,31 +283,13 @@ def positive_patch_fraction(label_tyx, xdim, ydim, patch_size=(32, 32),
         lab = lab[None]
     if lab.ndim != 3:
         raise ValueError(f"标签场需为 (Y,X) 或 (T,Y,X)，实际 {lab.shape}")
-    ph, pw = patch_size
-    sy, sx = stride
-    dx = float(xdim[1] - xdim[0])
-    dy = float(ydim[1] - ydim[0])
-    # 种子格相对 patch 原点 (0,0) 的整数偏移（物理→最近格，与 mask_at 同口径）；
-    # 种子图案与 extract 共用 seeding_grid，网格等距故偏移与绝对位置无关。
-    seeds = extractor.seeding_grid((0, 0), patch_size, xdim, ydim,
-                                   groups, delta_frac)
-    off_y = np.clip(np.rint((seeds[:, 1] - ydim[0]) / dy).astype(np.intp), 0, ph - 1)
-    off_x = np.clip(np.rint((seeds[:, 0] - xdim[0]) / dx).astype(np.intp), 0, pw - 1)
     frame_idx = np.arange(lab.shape[0]) if frame_indices is None else np.asarray(frame_indices)
     n_pos = n_tot = 0
     for t in frame_idx:
-        frame = lab[t].astype(bool)
-        H, W = frame.shape
-        if H < ph or W < pw:
-            raise ValueError(f"帧尺寸 {frame.shape} 小于 patch {patch_size}")
-        ys = np.arange(0, H - ph + 1, sy)
-        xs = np.arange(0, W - pw + 1, sx)
-        # 每个 (patch, 种子) 的标签 → (nY, nX, K) → 任一种子为正 → 该 patch 正
-        seed_y = ys[:, None, None] + off_y[None, None, :]
-        seed_x = xs[None, :, None] + off_x[None, None, :]
-        pos = frame[seed_y, seed_x].any(axis=-1)
-        n_pos += int(pos.sum())
-        n_tot += int(pos.size)
+        pos_map = patch_positive_map(lab[t], xdim, ydim, patch_size, stride,
+                                     groups, delta_frac)
+        n_pos += int(pos_map.sum())
+        n_tot += int(pos_map.size)
     if n_tot == 0:
         raise ValueError("无有效 patch 位置（帧尺寸不足）")
     return {"n_patches": n_tot, "n_positive": n_pos,

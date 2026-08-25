@@ -79,6 +79,19 @@ def velocity_at(u, v, x, y, t, xdim, ydim, tdim):
 
 # --------------------------------------------------------------------------- 掩膜查询
 
+def nearest_cell(xs, ys, xdim, ydim):
+    """物理坐标 → 最近格 (j, i)（四舍五入 floor(g+0.5)；等距坐标）。
+
+    单一公式：mask_at（种子判固体）、weak_labels.patch_seed_offsets（正样本
+    判据）、dataset 的标签/种子判定共用——防"最近格"口径多份漂移。
+    标量或数组输入均可；不做越界 clip（调用方按语义处理：
+    mask_at 越界 → 非固体；dataset 判定 clip 到边界格）。
+    """
+    gx = (np.asarray(xs, dtype=np.float64) - xdim[0]) / (xdim[1] - xdim[0])
+    gy = (np.asarray(ys, dtype=np.float64) - ydim[0]) / (ydim[1] - ydim[0])
+    return np.floor(gy + 0.5).astype(np.intp), np.floor(gx + 0.5).astype(np.intp)
+
+
 def mask_at(mask, x, y, xdim, ydim):
     """物理坐标 → 最近格（四舍五入）的掩膜值；越界视为 False（域外由积分器停止）。
 
@@ -90,10 +103,7 @@ def mask_at(mask, x, y, xdim, ydim):
     if mask.ndim == 3:
         mask = mask[0]
     Y, X = mask.shape
-    gx = _float_index(x, xdim)
-    gy = _float_index(y, ydim)
-    i = int(np.floor(gx + 0.5))
-    j = int(np.floor(gy + 0.5))
+    j, i = nearest_cell(x, y, xdim, ydim)
     if i < 0 or i >= X or j < 0 or j >= Y:
         return False
     return bool(mask[j, i])
@@ -379,6 +389,252 @@ def extract_pathlines(u, v, mask, ivd, xdim, ydim, tdim,
     return out
 
 
+# --------------------------------------------------------------------------- 向量化批量提取（票 05）
+
+
+def _interp_pair(u, v, xs, ys, ts, xdim, ydim, tdim):
+    """u/v 双场共享权重的向量化三线性时空插值（与 trilinear_interp 同语义）。
+
+    一次计算 (gx, gy, 角索引, 权重)，对 u 与 v 各做一次 8 角 gather——
+    批量积分器每子步只承担一次索引计算。时间分量标量化：批量积分中所有
+    迹线同步推进（同一子步时刻相同），时间帧索引为标量。
+    输入 xs/ys/ts 为 (N,) 数组（ts 全同值），返回 (u_interp, v_interp) 各 (N,)。
+    与标量 trilinear_interp 的双份公式由守护测试保证一致。
+    """
+    u = np.asarray(u)
+    v = np.asarray(v)
+    T, Y, X = u.shape
+    ts = np.asarray(ts)
+    if ts.size and not np.all(ts == ts.reshape(-1)[0]):
+        raise ValueError("_interp_pair 仅支持同步时间（批量积分中所有迹线同一时刻）")
+    gx = (xs - xdim[0]) / (xdim[1] - xdim[0])
+    gy = (ys - ydim[0]) / (ydim[1] - ydim[0])
+    gt = float(ts.reshape(-1)[0] - tdim[0]) / (tdim[1] - tdim[0])
+    t0_ = min(max(int(np.floor(gt)), 0), T - 1)
+    t1_ = min(int(np.ceil(gt)), T - 1)
+    wt = gt - t0_
+    x0 = np.clip(np.floor(gx).astype(np.int64), 0, X - 1)
+    x1 = np.clip(np.ceil(gx).astype(np.int64), 0, X - 1)
+    y0 = np.clip(np.floor(gy).astype(np.int64), 0, Y - 1)
+    y1 = np.clip(np.ceil(gy).astype(np.int64), 0, Y - 1)
+    wx = gx - x0
+    wy = gy - y0
+    yx = Y * X
+    # 8 角索引以增量偏移构造（x/y 角差为向量、帧差为标量：t1_==t0_ 时同帧，
+    # 边界格 x1==x0/y1==y0 时角差值 0 → 无越界，与标量 clamp 语义逐角一致）
+    dxo = (x1 - x0).astype(np.int64)
+    dyo = (y1 - y0) * X
+    fo = 0 if t1_ == t0_ else yx
+    base = t0_ * yx + y0 * X + x0
+    offs = np.stack([dxo * 0, dxo, dyo, dxo + dyo,
+                     dxo * 0 + fo, fo + dxo, fo + dyo, fo + dxo + dyo], axis=1)
+    idx = (base[:, None] + offs).reshape(-1)
+
+    # 权重 (N, 8)：4 空间角 × 2 时间帧（先在 _gather 使用前构造，避免延迟绑定歧义）
+    w = np.empty((len(wx), 8), dtype=np.float64)
+    a0 = (1 - wx) * (1 - wy)
+    a1 = wx * (1 - wy)
+    a2 = (1 - wx) * wy
+    a3 = wx * wy
+    w[:, 0] = a0 * (1 - wt)
+    w[:, 1] = a1 * (1 - wt)
+    w[:, 2] = a2 * (1 - wt)
+    w[:, 3] = a3 * (1 - wt)
+    w[:, 4] = a0 * wt
+    w[:, 5] = a1 * wt
+    w[:, 6] = a2 * wt
+    w[:, 7] = a3 * wt
+
+    def _gather(field):
+        vals = np.asarray(field).reshape(-1)[idx].reshape(len(wx), 8)
+        return vals * w
+
+    return _gather(u).sum(axis=1), _gather(v).sum(axis=1)
+
+
+def _integrate_batched(u, v, mask, seeds, t0, dt_out, L, xdim, ydim, tdim,
+                       n_substeps=4):
+    """向量化批量 RK4 积分：K 条迹线同步推进（与 integrate_pathline 同语义）。
+
+    冻结语义 == 标量"截断并重复末点"：失效迹线（出域/入固体）不再更新，
+    其后位置/时间保持上一有效采纳点（pad_repeat_last 的批量等价）。
+    返回 (pos (K,L,2) float64, times (K,L), n (K,))：n = 有效输出步数（含种子点，
+    与标量 pos 长度一致；完整 = L）。
+    """
+    u = np.asarray(u)
+    v = np.asarray(v)
+    xdim = np.asarray(xdim, dtype=np.float64)
+    ydim = np.asarray(ydim, dtype=np.float64)
+    tdim = np.asarray(tdim, dtype=np.float64)
+    K = seeds.shape[0]
+    dx = xdim[1] - xdim[0]
+    dy = ydim[1] - ydim[0]
+    x_min, x_max = xdim[0] - dx / 2.0, xdim[-1] + dx / 2.0
+    y_min, y_max = ydim[0] - dy / 2.0, ydim[-1] + dy / 2.0
+    t_min, t_max = tdim[0], tdim[-1]
+    h = float(dt_out) / n_substeps
+    m2 = None
+    if mask is not None:
+        m2 = np.asarray(mask, dtype=bool)
+        if m2.ndim == 3:
+            m2 = m2[0]
+    Y, X = m2.shape if m2 is not None else (len(ydim), len(xdim))
+
+    pos = np.empty((K, L, 2), dtype=np.float64)
+    pos[:, 0] = seeds
+    times = np.empty((K, L), dtype=np.float64)
+    times[:, 0] = float(t0)
+    active = np.ones(K, dtype=bool)
+    n = np.ones(K, dtype=np.intp)
+    for step in range(1, L):
+        # 冻结行：上一有效点（失效迹线从本行起保持重复末点——截断语义）
+        pos[:, step] = pos[:, step - 1]
+        times[:, step] = times[:, step - 1]
+        if not active.any():
+            continue
+        idx = np.nonzero(active)[0]
+        px = pos[idx, step - 1, 0].copy()
+        py = pos[idx, step - 1, 1].copy()
+        t = times[idx, step - 1].copy()
+        for _ in range(n_substeps):
+            k1x, k1y = _interp_pair(u, v, px, py, t, xdim, ydim, tdim)
+            k2x, k2y = _interp_pair(u, v, px + 0.5 * h * k1x, py + 0.5 * h * k1y,
+                                    t + 0.5 * h, xdim, ydim, tdim)
+            k3x, k3y = _interp_pair(u, v, px + 0.5 * h * k2x, py + 0.5 * h * k2y,
+                                    t + 0.5 * h, xdim, ydim, tdim)
+            k4x, k4y = _interp_pair(u, v, px + h * k3x, py + h * k3y,
+                                    t + h, xdim, ydim, tdim)
+            px += (h / 6.0) * (k1x + 2.0 * k2x + 2.0 * k3x + k4x)
+            py += (h / 6.0) * (k1y + 2.0 * k2y + 2.0 * k3y + k4y)
+            t += h
+        # 输出步检查（与标量同序：出域 → 入固）
+        out_ok = ~((px <= x_min) | (px >= x_max) | (py <= y_min) | (py >= y_max)
+                   | (t < t_min) | (t > t_max))
+        in_solid = np.zeros(len(idx), dtype=bool)
+        if m2 is not None and out_ok.any():
+            gx = (px[out_ok] - xdim[0]) / dx
+            gy = (py[out_ok] - ydim[0]) / dy
+            i = np.floor(gx + 0.5).astype(np.intp)
+            j = np.floor(gy + 0.5).astype(np.intp)
+            inb = (i >= 0) & (i < X) & (j >= 0) & (j < Y)
+            inb &= m2[j, i]                       # 越界段已由 out_ok 排除，此守护防错
+            in_solid[out_ok] = inb
+        dead = ~out_ok | in_solid
+        if dead.any():
+            active[idx[dead]] = False            # 失效者不采纳该步（行已冻结为 step-1）
+        alive = idx[~dead]
+        if alive.size:
+            pos[alive, step] = np.stack([px[~dead], py[~dead]], axis=1)
+            times[alive, step] = t[~dead]
+            n[alive] += 1
+    return pos, times, n
+
+
+def extract_pathlines_batched(u, v, mask, ivd, xdim, ydim, tdim,
+                              patch_yx, patch_size=(32, 32), t0=0.0, L=16,
+                              groups=(8, 8), delta_frac=0.05, t_win_frames=24,
+                              n_substeps=4, dt_out=None, rng=None,
+                              max_integration_attempts=3, return_seeds=False):
+    """向量化批量迹线提取（票 05；供 dataset 的 on-the-fly 样本生成）
+    → (L, K, 7) float32（与 extract_pathlines 同口径同公式）。
+
+    - 种子图案 / 重播种 / 截断 / 短迹线重试 / 通道语义与 extract_pathlines
+      完全一致；积分批量化（K 条同步 RK4），每子步共享一次索引计算。
+    - **rng 语义（与逐条版不同构）**：重播种/重试的随机源按
+      SeedSequence([base_seed, k, attempt]) 逐迹线派生 → 样本级可复现
+      （同 base_seed 同输入 → 同输出），无单流相位问题；
+      base_seed = int(rng)（Generator 取其一个 32 位整数；None → 系统熵）。
+    - 一致性守护：无随机消费路径（种子不落固体、不触发短迹线重试）时
+      与逐条版逐元素一致（公式同源）；含随机路径时两者是同一个重播种
+      语义（JittorReSeeding）的不同随机实现，不保证逐元素一致。
+    - return_seeds=True 返回 (out, seeds)（seeds = 每条迹线的最终种子，
+      重播种/重试后的实际出发位置，供标签判定与可视化）。
+    """
+    u = np.asarray(u)
+    v = np.asarray(v)
+    xdim = np.asarray(xdim, dtype=np.float64)
+    ydim = np.asarray(ydim, dtype=np.float64)
+    tdim = np.asarray(tdim, dtype=np.float64)
+    gy, gx = groups
+    dt = tdim[1] - tdim[0]
+    if dt_out is None:
+        dt_out = (t_win_frames - 1) * dt / (L - 1)
+    geo = patch_geometry(patch_yx, patch_size, xdim, ydim)
+    cx, cy, hx, hy = geo["cx"], geo["cy"], geo["hx"], geo["hy"]
+    if isinstance(rng, (int, np.integer)):
+        rng_base = int(rng)
+    elif isinstance(rng, np.random.Generator):
+        rng_base = int(rng.integers(0, 2 ** 31))
+    else:
+        rng_base = int(np.random.default_rng().integers(0, 2 ** 31))
+    center = np.array([cx, cy])
+    K = gy * gx * 4
+    out = np.zeros((L, K, N_CHANNELS), dtype=np.float32)
+
+    # 阶段 1：逐 k 首次重播种（per-k 确定性派生，样本级可复现）。
+    # 惰性 rng：仅对落固体的种子构造（全流体 patch 零 rng 开销；确定性保持一致：
+    # 每 k 的派生只依赖 (rng_base, k)，与消费与否无关）。
+    seeds = np.array(seeding_grid(patch_yx, patch_size, xdim, ydim,
+                                  groups, delta_frac), dtype=np.float64)
+    mask2d = None
+    if mask is not None:
+        m = np.asarray(mask, dtype=bool)
+        mask2d = m[0] if m.ndim == 3 else m
+    if mask2d is not None:
+        j, i = nearest_cell(seeds[:, 0], seeds[:, 1], xdim, ydim)
+        j = np.clip(j, 0, mask2d.shape[0] - 1)
+        i = np.clip(i, 0, mask2d.shape[1] - 1)
+        solid_k = np.nonzero(mask2d[j, i])[0]
+    else:
+        solid_k = np.empty(0, dtype=np.intp)
+    for k in solid_k:
+        rng_k = np.random.default_rng(np.random.SeedSequence([rng_base, k]))
+        seeds[k] = reseed(seeds[k], mask, center, xdim, ydim, rng=rng_k)
+
+    # 阶段 2：批量积分（失效迹线冻结为重复末点）
+    pos, times, n = _integrate_batched(
+        u, v, mask, seeds, float(t0), dt_out, L, xdim, ydim, tdim,
+        n_substeps=n_substeps)
+
+    # 阶段 3：短迹线（≤2 点）按 k 序重试（仿逐条版 suc 判据；低频兜底，
+    # 逐条标量函数复用 → 公式同源）
+    for k in np.nonzero(n <= 2)[0]:
+        seed = seeds[k]
+        pos_k = times_k = None
+        for attempt in range(max_integration_attempts):
+            rng_k = np.random.default_rng(
+                np.random.SeedSequence([rng_base, k, attempt]))
+            seed = reseed(seed, mask, center, xdim, ydim, rng=rng_k)
+            pos_k, times_k, _status = integrate_pathline(
+                u, v, mask, seed, float(t0), dt_out, L, xdim, ydim, tdim,
+                n_substeps=n_substeps)
+            if len(pos_k) >= 3 or attempt == max_integration_attempts - 1:
+                break
+            seed = seed + 0.5 * (center - seed)     # 朝 patch 中心大幅移动后重试
+        seeds[k] = seed
+        n[k] = len(pos_k)
+        pos[k] = pad_repeat_last(pos_k, L)
+        times[k] = pad_repeat_last(times_k[:, None], L)[:, 0]
+
+    # 通道组装（与逐条版同公式）：位置已归一化；t/ivd/dist/u/v 原始值
+    out[:, :, CH_PX] = ((pos[:, :, 0] - cx) / hx).T
+    out[:, :, CH_PY] = ((pos[:, :, 1] - cy) / hy).T
+    out[:, :, CH_T] = times.T
+    if ivd is not None:
+        out[:, :, CH_IVD] = interp_path(ivd, pos.reshape(-1, 2),
+                                        times.ravel(), xdim, ydim,
+                                        tdim).reshape(K, L).T
+    out[:, :, CH_DIST] = np.hypot(pos[:, :, 0] - seeds[:, None, 0],
+                                  pos[:, :, 1] - seeds[:, None, 1]).T
+    out[:, :, CH_U] = interp_path(u, pos.reshape(-1, 2), times.ravel(),
+                                  xdim, ydim, tdim).reshape(K, L).T
+    out[:, :, CH_V] = interp_path(v, pos.reshape(-1, 2), times.ravel(),
+                                  xdim, ydim, tdim).reshape(K, L).T
+    if return_seeds:
+        return out, seeds
+    return out
+
+
 # --------------------------------------------------------------------------- 可视化（验收 1：目检）
 
 def plot_pathlines(u_t, mask2d, pathlines_phys, seeds_phys, xdim, ydim,
@@ -468,8 +724,11 @@ def main(argv=None):
         for t0f in frames:
             u_win = np.asarray(f["u"][t0f:t0f + args.t_win], dtype=np.float32)
             v_win = np.asarray(f["v"][t0f:t0f + args.t_win], dtype=np.float32)
+            # 窗口切片场必须配窗口 tdim（时间索引相对窗口起点；传全场 tdim 会把
+            # 时间映射 clamp 到窗口末帧——票 05 实测的时变冻结 bug 修复点）
+            tdim_win = tdim[t0f:t0f + args.t_win]
             out, seeds = extract_pathlines(
-                u_win, v_win, mask2d, None, xdim, ydim, tdim,
+                u_win, v_win, mask2d, None, xdim, ydim, tdim_win,
                 patch_yx=patch_yx, patch_size=patch_size,
                 t0=float(tdim[t0f]), L=16,
                 rng=np.random.default_rng(t0f), return_seeds=True)
