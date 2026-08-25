@@ -6,7 +6,7 @@
 
 - 工作语言：中文；领域词汇以 HANDOFF.md 为准。
 - 参考仓库 `PyflowVis-main`（本机只读参考，不在本仓库内；不直接依赖）。
-- 代码托管：https://github.com/etl5736/2d-vortex-extraction-260825 （Kaggle 训练从该仓库克隆）。
+- 代码托管：https://github.com/ziyixu317-wq/2d-vortex-extraction-260825 （Kaggle 训练从该仓库克隆）。
 
 ## Agent skills
 
