@@ -539,3 +539,39 @@ class TestRealData:
         assert mean_cos > 0.9, f"切向一致性余弦 {mean_cos:.4f} 过低"
         # 有效长度分布：多数迹线完整推进（>50% 有效点占比）
         assert n_valid_points / (256 * 16) > 0.5
+
+
+# ================================================================ 切片 6：seeding_grid（种子公式单一来源）
+
+class TestSeedingGrid:
+    """seeding_grid：256 种子物理坐标（组主序）——extract_pathlines 与
+    weak_labels 正样本统计共用的单一公式（防双份漂移）。"""
+
+    def test_seeds_match_extract_output(self):
+        """一致性守护：无障碍物时 extract_pathlines(return_seeds=True) 的种子 =
+        seeding_grid 输出（extract 内部使用共享公式则恒等）。"""
+        Y, X, T = 40, 60, 8
+        xdim, ydim, tdim = grid(Y, X, T)
+        u = np.full((T, Y, X), 1.0, dtype=np.float32)
+        v = np.zeros((T, Y, X), dtype=np.float32)
+        patch = (4, 14)
+        _, seeds = extractor.extract_pathlines(
+            u, v, None, None, xdim, ydim, tdim, patch_yx=patch, patch_size=(32, 32),
+            t0=0.0, L=16, rng=np.random.default_rng(0), return_seeds=True)
+        want = extractor.seeding_grid(patch, (32, 32), xdim, ydim)
+        assert seeds.shape == (256, 2)
+        assert np.allclose(seeds, want, atol=1e-12)
+
+    def test_seed_cross_shape_group_major(self):
+        """组 0 的 4 条为轴向卫星十字（不含中心，组主序在 0..3）：x±Δ 与 y±Δ
+        对称于组中心。"""
+        xdim, ydim, _ = grid()
+        seeds = extractor.seeding_grid((4, 14), (32, 32), xdim, ydim)
+        assert seeds.shape == (256, 2)
+        a, b, c, d = seeds[0], seeds[1], seeds[2], seeds[3]   # x−Δ, y−Δ, x+Δ, y+Δ
+        cx = (a[0] + c[0]) / 2.0
+        cy = (b[1] + d[1]) / 2.0
+        assert a[0] < cx < c[0]            # 左右卫星（x 轴对）
+        assert b[1] < cy < d[1]            # 上下卫星（y 轴对）
+        assert a[1] == c[1] == cy          # 左右卫星 y = 组中心 y
+        assert b[0] == d[0] == cx          # 上下卫星 x = 组中心 x

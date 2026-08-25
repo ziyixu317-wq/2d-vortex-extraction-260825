@@ -274,6 +274,34 @@ def interp_path(field, pos, times, xdim, ydim, tdim):
     return (a * (1 - wt) + b * wt).ravel()
 
 
+def seeding_grid(patch_yx, patch_size, xdim, ydim, groups=(8, 8), delta_frac=0.05):
+    """256 条迹线的种子物理坐标 (K,2)——组主序，与 extract_pathlines 共用同一公式。
+
+    口径（HANDOFF §1 决策 6 / §6 / 票 03）：
+    - K = 64 组 × 4 轴向卫星点（不含中心）= 256 条，组主序编组（组 0 的 4 条在前）；
+    - 组中心 = patch 内 [0.1,0.9] 区间等距网格（仿 C++ GridCrossSampling 边距）；
+    - Δ = patch 边长 × delta_frac（x/y 分别按格距计算）。
+    单一事实来源：extract_pathlines 与 weak_labels（正样本统计）均从此取种子，
+    防止公式双份漂移。
+    """
+    geo = patch_geometry(patch_yx, patch_size, xdim, ydim)
+    gy, gx = groups
+    span_x, span_y = geo["span_x"], geo["span_y"]
+    x_lo, y_lo = geo["x_lo"], geo["y_lo"]
+    delta_x = span_x * delta_frac
+    delta_y = span_y * delta_frac
+    xc = x_lo + 0.1 * span_x + np.arange(gx) * (0.8 * span_x) / (gx - 1)
+    yc = y_lo + 0.1 * span_y + np.arange(gy) * (0.8 * span_y) / (gy - 1)
+    seeds = np.empty((gy * gx * 4, 2), dtype=np.float64)
+    k = 0
+    for i in range(gy):                      # y 外层（仿 C++ 行主序）
+        for j in range(gx):
+            for ox, oy in ((-delta_x, 0.0), (0.0, -delta_y), (delta_x, 0.0), (0.0, delta_y)):
+                seeds[k] = (xc[j] + ox, yc[i] + oy)
+                k += 1
+    return seeds
+
+
 def extract_pathlines(u, v, mask, ivd, xdim, ydim, tdim,
                       patch_yx, patch_size=(32, 32), t0=0.0, L=16,
                       groups=(8, 8), delta_frac=0.05, t_win_frames=24,
@@ -315,46 +343,37 @@ def extract_pathlines(u, v, mask, ivd, xdim, ydim, tdim,
     geo = patch_geometry(patch_yx, patch_size, xdim, ydim)
     cx, cy = geo["cx"], geo["cy"]
     hx, hy = geo["hx"], geo["hy"]
-    x_lo, y_lo = geo["x_lo"], geo["y_lo"]
-    span_x, span_y = geo["span_x"], geo["span_y"]
-    delta_x = span_x * delta_frac     # 卫星偏移 Δ = patch 边长×0.05（HANDOFF §6）
-    delta_y = span_y * delta_frac
-    # 组中心：0.1~0.9 区间等距（仿 C++ GridCrossSampling 边距）
-    xc = x_lo + 0.1 * span_x + np.arange(gx) * (0.8 * span_x) / (gx - 1)
-    yc = y_lo + 0.1 * span_y + np.arange(gy) * (0.8 * span_y) / (gy - 1)
+    # 种子图案：组中心 [0.1,0.9] 等距网格 × 4 轴向卫星（共用 seeding_grid 单一公式）
+    seeds_grid = seeding_grid(patch_yx, patch_size, xdim, ydim, groups, delta_frac)
     rng = rng if rng is not None else np.random.default_rng()
     center = np.array([cx, cy])
 
     K = gy * gx * 4
     out = np.zeros((L, K, N_CHANNELS), dtype=np.float32)
     seeds = np.zeros((K, 2), dtype=np.float64)
-    k = 0
-    for i in range(gy):                      # y 外层（仿 C++ 行主序）
-        for j in range(gx):
-            for ox, oy in ((-delta_x, 0.0), (0.0, -delta_y), (delta_x, 0.0), (0.0, delta_y)):
-                seed = np.array([xc[j] + ox, yc[i] + oy])
-                for attempt in range(max_integration_attempts):
-                    seed = reseed(seed, mask, center, xdim, ydim, rng=rng)
-                    pos, times, _status = integrate_pathline(
-                        u, v, mask, seed, t0, dt_out, L, xdim, ydim, tdim,
-                        n_substeps=n_substeps)
-                    if len(pos) >= 3 or attempt == max_integration_attempts - 1:
-                        break
-                    # 积分太短（仿 C++ suc 判据）→ 朝 patch 中心大幅移动后重试
-                    seed = seed + 0.5 * (center - seed)
-                seeds[k] = seed
-                n = len(pos)
-                rows = np.zeros((n, N_CHANNELS), dtype=np.float64)
-                rows[:, CH_PX] = (pos[:, 0] - cx) / hx
-                rows[:, CH_PY] = (pos[:, 1] - cy) / hy
-                rows[:, CH_T] = times
-                if ivd is not None:
-                    rows[:, CH_IVD] = interp_path(ivd, pos, times, xdim, ydim, tdim)
-                rows[:, CH_DIST] = np.hypot(pos[:, 0] - seed[0], pos[:, 1] - seed[1])
-                rows[:, CH_U] = interp_path(u, pos, times, xdim, ydim, tdim)
-                rows[:, CH_V] = interp_path(v, pos, times, xdim, ydim, tdim)
-                out[:, k, :] = pad_repeat_last(rows, L)
-                k += 1
+    for k in range(K):                       # 组主序（与 seeding_grid 编组一致）
+        seed = seeds_grid[k].copy()
+        for attempt in range(max_integration_attempts):
+            seed = reseed(seed, mask, center, xdim, ydim, rng=rng)
+            pos, times, _status = integrate_pathline(
+                u, v, mask, seed, t0, dt_out, L, xdim, ydim, tdim,
+                n_substeps=n_substeps)
+            if len(pos) >= 3 or attempt == max_integration_attempts - 1:
+                break
+            # 积分太短（仿 C++ suc 判据）→ 朝 patch 中心大幅移动后重试
+            seed = seed + 0.5 * (center - seed)
+        seeds[k] = seed
+        n = len(pos)
+        rows = np.zeros((n, N_CHANNELS), dtype=np.float64)
+        rows[:, CH_PX] = (pos[:, 0] - cx) / hx
+        rows[:, CH_PY] = (pos[:, 1] - cy) / hy
+        rows[:, CH_T] = times
+        if ivd is not None:
+            rows[:, CH_IVD] = interp_path(ivd, pos, times, xdim, ydim, tdim)
+        rows[:, CH_DIST] = np.hypot(pos[:, 0] - seed[0], pos[:, 1] - seed[1])
+        rows[:, CH_U] = interp_path(u, pos, times, xdim, ydim, tdim)
+        rows[:, CH_V] = interp_path(v, pos, times, xdim, ydim, tdim)
+        out[:, k, :] = pad_repeat_last(rows, L)
     if return_seeds:
         return out, seeds
     return out
