@@ -83,6 +83,8 @@ cylinder_vortex_pipeline/
 ├── train_kaggle.py              # 自写训练脚本（TwoStep、断点续训、可选 DataParallel/AMP）
 ├── evaluate.py                  # TTA 推理、网格投影、对比图/动画、弱定量表
 ├── config/pathline_transformer_cylinder.yaml
+├── CLAUDE.md                   # agent 入口说明（唯一权威仍是本文件）
+├── docs/agents/                # ask-matt 配置：issue-tracker.md / triage-labels.md / domain.md
 ├── HANDOFF.md                   # 本文件
 └── NEW_SESSION_PROMPT.md        # 新会话启动 prompt
 ```
@@ -151,7 +153,7 @@ cylinder_vortex_pipeline/
 
 ## 9. 工作流（新会话如何推进）
 
-**前置检查**：`to-spec`/`to-tickets` 依赖 issue tracker 与 triage 标签配置（`docs/agents/issue-tracker.md` 等）。本项目尚未配置 → 请用户先运行 `/setup-matt-pocock-skills`（推荐选 **Local markdown**，即 `.scratch/<feature-slug>/` 方案，本项目无 git 远程）。
+**前置检查**：`to-spec`/`to-tickets` 依赖 issue tracker 与 triage 标签配置（`docs/agents/issue-tracker.md` 等）。✅ 已配置（2026-08-25）：**Local markdown** 追踪器（`.scratch/<feature-slug>/`：spec.md + `issues/NN-<slug>.md` 一票一文件，五默认 triage 标签），详见 `docs/agents/issue-tracker.md`、`docs/agents/triage-labels.md`。代码托管 GitHub：`ziyixu317-wq/2d-vortex-extraction-260825`（Kaggle 训练从该仓库克隆；数据集仍走 Kaggle Dataset）。
 
 **主线（ask-matt 多会话构建分支）**：
 1. 完整阅读本 HANDOFF 文档；若某节与代码现实冲突，以代码为准并在 §11 记一条修正。
@@ -172,4 +174,5 @@ cylinder_vortex_pipeline/
 **协议**：每次会话结束前必须追加一条；事实变化改正文对应节（§1/§2/§4/§6），日志只记"改了什么、为什么、还差什么"。保持本文档为单一事实来源，不要另起炉灶。
 
 - 2026-05-xx 成立：基于三轮回合（论文/代码/数据逐行核实 + 用户决策）形成本文档；取代 `工作计划_迹线Transformer涡提取.md`。当前进度：尚未开始阶段 0。
+- 2026-08-25 ask-matt 配置建立：运行 `/setup-matt-pocock-skills`，创建 `docs/agents/{issue-tracker,triage-labels,domain}.md` 与 `CLAUDE.md`（Local markdown tracker，五默认标签；仓库 URL 经用户确认定为 ziyixu317-wq 账号）。代码托管 GitHub `ziyixu317-wq/2d-vortex-extraction-260825`：初始 commit `5cf066c`（项目骨架）+ `a354652`（URL 修正）已推送，main 同步。**新环境事实（§2 之外）**：① 本机 git schannel 后端 + 本地代理 127.0.0.1:7890 有兼容性问题（`SEC_E_NO_CREDENTIALS`），推送须 `-c http.sslBackend=openssl`；② DSH 沙箱内 git 无法调用 GCM（signal pipe 限制）→ GitHub 认证类操作须用户在普通终端完成。未决问题：git 全局 user.email 为占位 `ziyi@example.com`（建议改为真实邮箱）；全局 sslBackend 是否改 openssl 待用户定（不改则每次推送带 `-c` 参数）。当前进度：仍为阶段 0 前，下一步按 §9 主线进入 `/to-spec`。
 - 未决问题：无阻塞性问题。τ 具体值、t_scale 取值、epoch 样本数待冒烟后定（§6 已给默认）。
