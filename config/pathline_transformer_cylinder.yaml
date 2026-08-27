@@ -15,7 +15,9 @@ data:
                                  # 采样口径监控（自然分布精度评估属票 08 弱定量表）
   batch_size: 100
   num_workers: 4                 # Kaggle T4×2 环境 4 核（torch 建议 ≤4；8 曾触发 warning）
-  samples_per_epoch: 40000       # HANDOFF §6：默认 40000、下限 20000
+  samples_per_epoch: 20000       # HANDOFF §6 下限（2026-08-25 票 07 步速校准回写：
+                                 # T4×2 实测 ~5s/步 → 40000×200 epoch ≈110h 超预算 4×；
+                                 # 降半至 20000 + TF32 → 预计 ~35-55h（50% 正样本过采样不变）
   positive_fraction: 0.5         # 50% 正样本过采样（训练抗失衡）
   patch_size: [32, 32]
   stride: [16, 16]

@@ -65,14 +65,30 @@ Kaggle Notebook 通过 `git clone https://github.com/ziyixu317-wq/2d-vortex-extr
 | 2 | git clone 代码 | `repo/` |
 | 3 | 挂载 Dataset A + 还原 checkpoint | `outputs/dataset/`（symlink） |
 | 4 | **验收 1**：环境自检（vendor import + 数据加载 + 模型前向） | 自检打印 |
-| 5 | **验收 2**：1 epoch 实测步速（全量 40000 样本） | `outputs/bench_info.json` + 分块计划 |
+| 5 | **验收 2**：1 epoch 实测步速（全量样本）+ 预算检查 | `outputs/bench_info.json` + 分块计划 |
 | 6 | **验收 3**：分块训练（本块 1 块；`--resume auto` 续训） | `outputs/train/*ckpt_latest.pth` 每 epoch + E 里程碑 |
 | 7 | 块尾打包（模式 A 发布 Dataset 新版本 / 模式 B 手动下载） | `ckpt_snapshot.zip` |
 | 8 | **验收 4**：训练完成后打印 val F1 + 最终归档 | `final_ckpt.zip` + `val_f1.json` |
+| 9 | （可选）**中途预览**：单帧 模型 vs IVD vs 弱标签三联图 | `outputs/preview/prob_vs_ivd_t1300.png` |
 
 **每会话一块**（`CHUNK_BUDGET_H=7.5h`，来自 12h 硬上限留自检/打包余量；`kaggle/chunking.py` 的 `plan_chunks` 是参数化纯函数——其测试用 8h 预算仅为算例，notebook 实际传 7.5h）；块尾打包 checkpoint 后本会话结束——**重启会话再 Run All** 即从 latest 无损续训（`--resume auto`：checkpoint 含 optimizer/scheduler 状态，采样序按 (seed, epoch) 确定性重建）。预计约 3–4 个会话完成 200 epoch。
 
 ## 6. 收尾与回填
+
+### 6.1 中途如何看模型效果（12h 会话内，可选）
+
+训练分块进行中（前几个会话、几十 epoch）想看模型学到什么，两个入口：
+
+1. **数字（推荐）**：进度基线跑一次纯评估（不训练）——`--epochs` 取当前进度（=latest 的 epoch+1），此时训练循环为空、只执行 `--report-f1`，写 `val_f1.json`（自然分布 F1/P/R + 混淆计数）：
+   ```bash
+   python train_kaggle.py --config config/pathline_transformer_cylinder.yaml \
+       --epochs <当前进度> --resume auto --report-f1
+   ```
+2. **图像（notebook cell 9）**：单帧「模型概率 vs IVD vs 弱标签」三联图（`kaggle/preview_eval.py`，TTA 次数可选；帧默认 1300 ∈ test 片）。
+
+**预期**（工程经验，以实测为准）：几十 epoch（lr=1e-4 段）高概率区域应大致落在涡街/拐角回流区，但边界毛糙、背景有噪声，F1 显著低于 200 epoch 终点——中途模型只用于**管线正确性检查**（标签流入、投影几何正确），不作为交付结果；正式评估（多帧对比/定量表/动画）在票 08。
+
+### 6.2 回填
 
 200 epoch 完成后（cell 6 输出 `progress()==200`，cell 8 打出 val F1 json）：
 

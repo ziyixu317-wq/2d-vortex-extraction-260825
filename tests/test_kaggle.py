@@ -425,3 +425,96 @@ class TestSelfCheck:
         with pytest.raises(FileNotFoundError):
             self_check(str(tmp_path / "nope"),
                        model_cfg=tt.make_small_model_cfg(), n_samples=1)
+
+
+# ================================================================ 切片 G：TF32 与中途评估入口
+
+class TestTf32AndMidwayEval:
+    """步速校准的工程参数落地（票 07 验收 2）：TF32 加速 + 中途 F1 评估入口。"""
+
+    def test_enable_tf32_sets_flags(self):
+        """enable_tf32：matmul/cudnn allow_tf32 置 True（T4 张量核；数值仍 fp32 语义）。"""
+        from train_kaggle import enable_tf32
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+        enable_tf32()
+        assert torch.backends.cuda.matmul.allow_tf32 is True
+        assert torch.backends.cudnn.allow_tf32 is True
+
+    def test_eval_only_when_epochs_equals_progress(self, tmp_path):
+        """中途评估入口：--epochs == 续训进度时训练循环为空 → 仅执行 --report-f1。
+
+        行为证据：先训 1 epoch（progress=1），再以 --epochs 1 --report-f1 运行 →
+        不训练（不报 loader 空），写 val_f1.json（epoch 字段 = 已完成进度-1）。
+        """
+        import json
+        from train_kaggle import main
+        cfg_path, ckpts = TestReportF1CLI.make_val_cfg(tmp_path, epochs=1)
+        assert main(["--config", str(cfg_path), "--max-steps", "2"]) == 0
+        assert main(["--config", str(cfg_path), "--max-steps", "2",
+                     "--epochs", "1", "--report-f1"]) == 0
+        f1_path = ckpts / "pathline_transformer_cylinder_val_f1.json"
+        assert f1_path.exists()
+        data = json.loads(f1_path.read_text(encoding="utf-8"))
+        assert data["epoch"] == 0
+        assert data["n"] > 0
+
+
+# ================================================================ 切片 H：单帧预览（kaggle/preview_eval.py）
+
+class TestProjectToGrid:
+    """逐迹线概率 → 网格投影（预览版；正式滑窗/TTA/定量表属票 08）。"""
+
+    def test_projection_accumulate_and_average(self):
+        """投影 = 累积 + 计数平均（重叠格取均值）；字面量手算（独立来源）。
+
+        seeds 行 = [x, y]（nearest_cell 口径）：三粒种子 → 格 (j,i) =
+        (2,1)、(2,1)（重叠）、(0,3)。
+        """
+        from kaggle.preview_eval import project_to_grid
+        xdim = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+        ydim = np.array([0.0, 1.0, 2.0, 3.0])
+        shape = (4, 5)
+        seeds = np.array([[0.7, 2.4], [0.8, 2.2], [3.3, 0.1]])
+        preds = np.array([0.9, 0.5, 0.2])
+        prob = project_to_grid(preds, seeds, xdim, ydim, shape)
+        assert prob[2, 1] == pytest.approx((0.9 + 0.5) / 2)   # 重叠格平均
+        assert prob[0, 3] == pytest.approx(0.2)
+        assert prob[0, 0] == 0.0                              # 无迹线格为 0
+        assert float(np.nansum(prob)) == pytest.approx(0.7 + 0.2)
+
+    def test_preview_main_writes_png(self, tmp_path):
+        """端到端预览：合成数据集 + 小模型 ckpt → 单帧对比图 png 落盘（4 联布局）。"""
+        import dataset as ds
+        import test_train as tt
+        from train_kaggle import load_config, main as train_main
+        from kaggle.preview_eval import main as preview_main
+        root = tmp_path / "ds_prev"
+        u, v, xdim, ydim, tdim = tds.synth_prepared(root, T=48)
+        slices = {"train": (0, 24), "val": (24, 48)}
+        ds.prepare_dataset(None, str(root), u=u, v=v, xdim=xdim, ydim=ydim,
+                           tdim=tdim,
+                           taus={"train": tds.SYNTH_TAU, "val": tds.SYNTH_TAU},
+                           slices=slices)
+        cfg_path = tmp_path / "prev.yaml"
+        cfg = load_config()
+        cfg["data"]["root"] = str(root)
+        cfg["data"]["num_workers"] = 0
+        cfg["data"]["samples_per_epoch"] = 8
+        cfg["data"]["batch_size"] = 4
+        cfg["train"]["epochs"] = 1
+        cfg["train"]["val_freq"] = 1
+        cfg["train"]["seed"] = 0
+        cfg["train"]["ckpt_dir"] = str(tmp_path / "ckpts_prev")
+        cfg["model"]["encoder_args"].update(tt.make_small_model_cfg())
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            import yaml
+            yaml.safe_dump(cfg, f)
+        train_main(["--config", str(cfg_path), "--max-steps", "2"])
+
+        out_png = tmp_path / "preview_t_24.png"
+        assert preview_main(["--config", str(cfg_path), "--ckpt",
+                             str(tmp_path / "ckpts_prev"
+                                 / "pathline_transformer_cylinder_ckpt_latest.pth"),
+                             "--frame", "24", "--out", str(out_png)]) == 0
+        assert out_png.exists() and out_png.stat().st_size > 1000

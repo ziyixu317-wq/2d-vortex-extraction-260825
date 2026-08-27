@@ -33,6 +33,18 @@ from vendor.DeepUtils.utils.random import set_random_seed
 DEFAULT_CONFIG_PATH = "config/pathline_transformer_cylinder.yaml"
 
 
+def enable_tf32():
+    """启用 TF32 matmul/卷积（T4 tensor core 加速，数值仍为 fp32 语义）。
+
+    2026-08-25 票 07 步速校准：T4×2 全精度实测 ~5s/步（上游 KNN 暴力 O(N²) +
+    DP 同步 + T4 fp32 无张量核加速；torch 2.10 默认 allow_tf32=False），
+    启用 TF32 预期 1.5~2×。训练界标准做法（matmul 尾数 10 位，收敛行为
+    与 fp32 一致）；论文口径的可复现性不受影响（同环境确定性一致）。
+    """
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+
+
 # --------------------------------------------------------------------------- TwoStep 调度
 
 def two_step_lr(epoch, lr, second_lr, warmup_epochs):
@@ -312,6 +324,7 @@ def main(argv=None):
     if args.epochs is not None:
         train_cfg["epochs"] = int(args.epochs)
     set_random_seed(int(train_cfg.get("seed", 0)))
+    enable_tf32()                 # T4 tensor core 加速（num 语义仍 fp32；见 enable_tf32 docstring）
     device = _resolve_device(train_cfg.get("device", "auto"))
 
     # ---- 模型/损失/优化器/调度

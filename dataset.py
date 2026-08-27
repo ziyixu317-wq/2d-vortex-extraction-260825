@@ -535,6 +535,20 @@ class WeakLabelPathlineDataset:
         self.positive_fraction = n_pos / total if total > 0 else 0.5
         return self.set_epoch(int(epoch))
 
+    def sample_at(self, py, px, frame):
+        """指定 (patch 位置 y0,x0, 窗口起点帧) 的完整样本——预览/诊断公开入口。
+
+        与 __getitem__ 同路径（_extract + normalize_pathlines + 标签判定），
+        返回 ((dummy_field, pathlines), labels, seeds)；不依赖 set_epoch/采样序
+        （任意 (patch, 帧) 组合可直接取——票 07 预览、票 08 滑窗评估的基础）。
+        """
+        raw, seeds, geo = self._extract(py, px, frame)
+        pathlines = normalize_pathlines(raw, seeds, geo, float(self._tdim[frame]),
+                                        self.t_span, self.t_scale, self.ivd_mu,
+                                        self.ivd_sigma, self.speed_max)
+        labels = self._labels_for(seeds, frame)
+        return (np.zeros((1, 1, 1, 1), dtype=np.float32), pathlines), labels, seeds
+
     # ---------------- __getitem__
 
     def __len__(self):
