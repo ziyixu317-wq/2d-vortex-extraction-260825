@@ -206,4 +206,8 @@ cylinder_vortex_pipeline/
 读缓存）vs 我们 on-the-fly CPU 提取（~0.9s/批）、③ DP 同步开销。Kaggle 免费层无 A100；已做最优
 （TF32 + samples 20000 → 预计 35-55h）；进一步预案：样本预缓存（消数据管线，~15-20%）/修 vendor 
 AMP（独立小票，改迁移忠实性）——目标 <20h 需 A100 级硬件。未决：调度器是否对齐论文 cosine 待用户决策。
+
 - 2026-08-25 票 07 运行反馈修复六期（首块实测与预算检查修复）：Kaggle 首次完整块运行——cell 5 步速校准实测 1 epoch = 1058s（20000 样本 × 200 步 ≈ 5.3 s/步；**TF32 实测收益 <10%**：KNN 距离计算/softmax 为逐元素与归约操作，TF32 仅加速 matmul——此前 1.5-2× 预估不成立）；**发现并修复**：notebook cell 5 预算检查在 total_h > 48h 时生成 train_opt.yaml 并 `amp=True` ——与三期结论（上游模型 Half/Float 原地赋值冲突必崩）直接冲突，总时长 58.7h > 48h 必然触发 → cell 6 第一步即 RuntimeError；修复为**不启用 AMP**（仅样本数降级 + 提示块数），基准文案改按 `bench['samples_per_epoch']` 打印（原写死 40000）。**新事实（§6 之外）**：T4×2 DP+TF32+20000 实测基准 = 5.3 s/步、17.6 min/epoch、200 epoch ≈ 59h ≈ 8 个 7.5h 块会话（README §5 已回写）；TF32 保留（无副作用、小收益）而非回滚。未决：无。下一步：用户 git push + 重跑（首会话 bench 复用策略生效：bench_info 只在其所在工作区；Save Version 新版本是全新工作区，每次都会重跑校准——已知成本 ~18min/会话，接受）。
+
+
+- 2026-08-25 票 07 运行反馈修复七期（校准「无输出」根因与修复）：用户报告校准 1 epoch 后（1096.5s）长时无输出、手动取消（1685s）——**根因**：train_kaggle.main 的 val 触发条件 `epoch == start_epoch` 恒真 → bench 校准完成后**强制跑 val 片全量评估（20000 样本、batch 100 ≈17.5min、无进度条（evaluate 为朴素 for 循环）**——期间日志仅剩 `print`（stdout 管道块缓冲）→ 表现为「卡死」；实测取消时 val 已运行 ~10min（还差 ~7.5min 完成）。**修复**：① bench 配置 `data.val_split="none"`（跳过 val——校准只测训练步速）；② 生产 `val_freq` 5→10（val 开销从每 5 epoch 17.5min 降到每 10 epoch；~7% 块占比，2026-08-25 工程权衡）；③ notebook cell 1 `PYTHONUNBUFFERED=1`（f624183，print 实时刷）。**新事实（日志节奏）**：正常节奏 = 校准 ~18min → 训练 tqdm 17.6min/epoch → 每 10 epoch 停顿 ~17.5min（val，无进度条）；取消本次运行无损失（bench ckpt 在 outputs/bench 独立目录、未写 bench_info——下个版本重测校准即可）。未决：无。下一步：用户 git push + 重跑 → 校准 18min 后直接进入训练（无中途长停顿）→ 块尾打包 → 下载 preview 图复核。

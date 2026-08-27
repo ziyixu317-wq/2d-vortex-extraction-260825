@@ -53,7 +53,8 @@ train:
   warmup_epochs: 60              # TwoStep 第一段（恒 lr；warmup 名称沿用官方）
   second_lr: 0.000005            # TwoStep 第二段（epoch ≥ 60）
   grad_clip: 1.0                 # 梯度裁剪范数
-  val_freq: 5                    # 每 N epoch 跑一次 val loss
+  val_freq: 10                   # 每 N epoch 跑一次 val loss（val=20000 样本 ≈17.5min；
+                                 # 10 与 5 相比监控频率减半、开销占块 ~7%；2026-08-25 校准）
   save_freq: 30                  # 里程碑快照频率（原仓库取值）；latest 仍每 epoch 更新
   seed: 0
   device: auto                   # auto = cuda 可用则 cuda（Kaggle T4），否则 cpu
