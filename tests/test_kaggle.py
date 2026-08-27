@@ -303,6 +303,40 @@ class TestPlanChunks:
             with pytest.raises(ValueError):
                 plan_chunks(**kwargs)
 
+    def test_pick_bench_source_prefers_new(self, tmp_path):
+        """步速基准来源：本会话实测优先于还原（新测值最新）。"""
+        import json
+        from kaggle.chunking import pick_bench_source
+        new = tmp_path / "bench_info.json"
+        old = tmp_path / "restored.json"
+        new.write_text(json.dumps({"seconds_per_epoch": 100.0}), encoding="utf-8")
+        old.write_text(json.dumps({"seconds_per_epoch": 200.0}), encoding="utf-8")
+        p, bench = pick_bench_source(str(new), str(old))
+        assert p == str(new) and bench["seconds_per_epoch"] == 100.0
+
+    def test_pick_bench_source_falls_back_to_restored(self, tmp_path):
+        """本会话无实测时回退到还原的基准（跨会话复用，省 ~18min 校准）。"""
+        import json
+        from kaggle.chunking import pick_bench_source
+        old = tmp_path / "restored.json"
+        old.write_text(json.dumps({"seconds_per_epoch": 1057.0}), encoding="utf-8")
+        p, bench = pick_bench_source(str(tmp_path / "missing.json"), str(old))
+        assert p == str(old) and bench["seconds_per_epoch"] == 1057.0
+
+    def test_pick_bench_source_none_when_missing(self, tmp_path):
+        """两个来源都不存在 → (None, None)（调用方跑校准）。"""
+        from kaggle.chunking import pick_bench_source
+        p, bench = pick_bench_source(str(tmp_path / "a.json"), str(tmp_path / "b.json"))
+        assert p is None and bench is None
+
+    def test_pick_bench_source_corrupt_json_raises(self, tmp_path):
+        """基准文件损坏 → 报错而非静默假值（fail loud）。"""
+        from kaggle.chunking import pick_bench_source
+        bad = tmp_path / "bad.json"
+        bad.write_text("{not json", encoding="utf-8")
+        with pytest.raises(ValueError):
+            pick_bench_source(str(bad), str(tmp_path / "none.json"))
+
 
 # ================================================================ 切片 E：Dataset A 打包（kaggle/prepare_dataset_a.py）
 

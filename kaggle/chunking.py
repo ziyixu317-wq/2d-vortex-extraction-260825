@@ -9,6 +9,24 @@
 
 from __future__ import annotations
 
+import json
+import os
+
+
+def pick_bench_source(new_path, restored_path):
+    """步速基准来源选择：本会话实测 → 上个会话还原（随 checkpoint 数据集打包）。
+
+    Kaggle Save Version 每个版本是全新工作区：首会话实测写 outputs/bench_info.json；
+    cell 7 块尾打包时复制到 outputs/train/（随 checkpoint 数据集发布/下载）→ 下会话
+    cell 3 还原 → 复用（省 ~18min 重复校准）。返回 (来源路径, bench dict)；
+    两者皆不存在时返回 (None, None)（调用方跑校准）。
+    """
+    for p in (str(new_path), str(restored_path)):
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8") as f:
+                return p, json.load(f)
+    return None, None
+
 
 def plan_chunks(total_epochs, seconds_per_epoch, budget_seconds):
     """总 epoch → 每块 epoch 序列（每块耗时 ≤ budget_seconds、块数最少）。
