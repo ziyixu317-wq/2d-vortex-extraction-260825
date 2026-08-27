@@ -46,7 +46,7 @@
 - 十字采样：8×8=64 组 × 4 卫星点 `(x±Δ,y),(x,y±Δ)`（**不含中心**），Δ = patch 边长×0.05；**组主序编组**（组 0 的 4 条在前）
 - PSL：组置换 + 空间下采样（64→32 组）+ 时间下采样（L 16→8）→ N = 32×4×8 = **1024 点**
 - 3 层 KNN Point-Transformer（k=16，相对位置编码 MLP）；全局池化 mean+max；特征传播回全部 256 条；sigmoid 输出每迹线涡概率；损失 BCE
-- 训练超参（论文附录 C）：AdamW(wd 1e-6)、lr 1e-4、batch 100、200 epochs、warmup 后降 lr（仓库 config 为 TwoStep：warmup 60、二段 5e-6）
+- 训练超参（论文附录 C 原文核实 2026-08-25，Zotero T76G9Z3A）：AdamW(wd 1e-6)、**cosine lr 调度（warmup 5 epoch + 195 epoch，共 200）**、batch 100、ReLU（末层 sigmoid）；**硬件 = Intel Xeon Gold 6230R ×2 + NVIDIA A100（单卡），200 epoch ≈ 14 小时**；训练集 = 3000 合成稳态场 × 20 个 Killing 变换 = **60,000 非定常场**（9:1 train/val，Vatistas 参数拟合生成——非仿真数据）。**实现口径（与论文的已知偏差，按仓库 config 复刻）**：lr 调度为 TwoStep（warmup 60、二段 5e-6——原仓库 `TwoStepLRScheduler`，票 06 已核实；cosine 为论文原文；如需对齐论文须改调度器，属用户决策）
 - **KNN 在 (x,y,t) 混合坐标上暴力计算 O(N²)** → 时空归一化尺度影响邻居选择；原训练数据 t/空间比≈0.2 → 用 `t_scale=0.25` 复刻（可调）
 - **推理非确定**：PSL 采样在 forward 恒 `random=True` → 评估用 TTA（同一样本随机采样 5 次取平均），或临时改 `random=False`
 
@@ -193,3 +193,16 @@ cylinder_vortex_pipeline/
 - 2026-08-25 票 07 运行反馈修复二期：① 首次 Run All 第二轮在 cell 3 失败（`assert ds_in is not None` —— 挂载 dataset 已添加但 `find_input("dataset/meta.json")` 未命中）→ cell 3 输入探测重写为**布局自适应**（直接命中/多一层嵌套/任意深度 rglob/zip 未解压自动解压回退）+ `[env] /kaggle/input 挂载:` 与失败时输入树全览诊断打印（下一轮实测日志：实际挂载路径为 `/kaggle/input/datasets/ziyixu317/2d-unsteady-cylinder-flow-around-corners/...` —— dataset 名称生成 slug 含多级目录，验证 rglob 兜底必要性）；notebook 各训练 subprocess 改显式 `cwd=REPO_DIR`、clone 后 `sys.path.insert(0, REPO_DIR)` 自举（防 Script 模式找不到 dataset/vendor）+ repo 根文件自证打印。② 挂载/克隆/自检全通过后，**步速校准（cell 5）训练前向 OOM**：`softmax(attn)` 分配 900MB 失败——GPU 0（T4 16GB）前向激活 13.5GB（batch 100 × 1024 点 × 3 层 Point-Transformer KNN+注意力）；**触发 HANDOFF §7 预案「超预算用 DataParallel/AMP」**：YAML 默认改 `amp: true` + `data_parallel: true`（Kaggle T4×2 自动生效、本地 CPU 路径不激活、测试全绿）、`num_workers` 8→4（Kaggle 4 核 warning）、notebook cell 1 设 `PYTORCH_ALLOC_CONF=expandable_segments:True`（子进程继承，OOM 提示建议）。**新事实（§6 之外）**：T4 单卡 16GB 下 batch 100 前向 ~13.5GB 显存（超出 ~2GB 安全余量）。未决：无。下一步：用户重跑（Runtime Restart and Run All）→ 步速校准应通过（1 epoch 全量 400 步）→ 分块训练。
 - 2026-08-25 票 07 运行反馈修复三期：AMP+DP 开跑后（OOM 已解，`DataParallel 已启用 (2 GPU)` 生效）第一步内即报 `RuntimeError: Index put requires the source and destination dtypes match, got Float for the destination and Half for the source`（`vendor/DeepUtils/models/segmentation/pathline_transformer.py:246` `full_features[:, ~mask, :] = self.feature_propagation(...)`）——**上游模型不兼容 AMP**：原地 index-put 在 autocast(Half) 下 dtype 冲突（原作者 24GB 卡全精度训练未用 AMP；迁移忠实性（票 01：38 文件 SHA256 逐字一致）不允许改 vendor）。处置：**AMP 默认关（`amp: false`）**，显存改由 **DataParallel 拆分**（T4×2：batch 100 → 每卡 50，峰值 ~6.8GB < 16GB；等效 batch 100 语义不变——DP 仅数据切分，非梯度累积）；顺带修 GradScaler deprecated API（`torch.amp.GradScaler('cuda', ...)`，消除 FutureWarning）。**新事实（§7 风险表之外）**：① T4×2 单机 DP 下 batch 100 全精度训练可行（无 AMP），余量 ~9GB；② 上游模型 AMP 不兼容是**硬约束**，若未来需要半精度须先修 vendor（独立小票，改迁移忠实性）；③ `num_workers` 4（Kaggle 4 核）。未决：无。下一步：用户重跑（需 `git push` 让 Kaggle clone 到最新 YAML）→ 步速校准 → 分块训练。
 - 2026-08-25 票 07 运行反馈修复四期（步速优化与中途评估入口）：用户确认「TF32 + samples_per_epoch 20000」组合（回答：论文训练硬件为 H100/3090 级（README 46 行 benchmark 目标；迹线积分 GPU CUDA 内核、C++ 离线预生成数据集），T4 fp32 8.1 TFLOPS 差 4-8×，故 1GB 数据 200 epoch 也需百小时级——计算密集负载而非体积问题）。实施：① `train_kaggle.enable_tf32()`（matmul/cudnn allow_tf32=True，数值仍 fp32 语义）+ main 调用；② YAML `samples_per_epoch` 40000→20000（§6 回写；每 epoch 200 步）；③ 中途评估入口验证：`--epochs == 续训进度` 时训练循环为空 → 仅 `--report-f1` 评估（**无需改代码的既有行为**，加守护测试）；④ 新增 `kaggle/preview_eval.py`（单帧滑窗 stride16+TTA n 次+投影（累积/计数平均）+ 模型/IVD/弱标签三联图——票 08 评估的简版子集，标注正式评估属票 08）+ `dataset.sample_at(y0,x0,frame)` 公开入口（与 __getitem__ 同路径，预览/票 08 滑窗共用）；⑤ notebook 追加 cell 9（可选中途预览）。**验证证据**：全量 155 passed（+4：TF32 flags、中途评估、投影字面量、预览端到端）；真实数据冒烟（随机初始化生产模型）：帧 1300 场 (150,450)、概率域 [0,0.754]、正格 2047、三联图落盘（中文标题在无 CJK 字体环境出豆腐块 → 标题改英文）。**新事实（§6 之外）**：中途几十 epoch（lr=1e-4 段）模型高概率区应落涡街/拐角回流区但边界毛糙、背景有噪声——仅作管线正确性检查，非交付结果。未决：无。下一步：用户 git push + 重跑 → 步速校准（TF32+20000）→ 分块训练 ~4-6 会话 → 票 08。
+
+- 2026-08-25 票 07 论文训练细节核实（Zotero T76G9Z3A 全文，用户授权查证）：论文 §3.1 「3000 steady × 20 Killing = 60000 unsteady fields（9:1 train/val，Vatistas 参数拟合合成，非仿真数据）」；附录 C Training Details 原文「batch 100、cosine lr scheduler、warm-up 5 epochs + 195 epochs、共 200、AdamW(wd 1e-6)、n=3 PT blocks h=144、64 组×4/组、L=16、ReLU（末层 sigmoid）、BCE」；性能节「Intel Xeon Gold 6230R×2 + NVIDIA A100 单卡，200 epochs ≈ 14 小时」。
+**事实修正（§2 模型事实行已改）**：论文调度器实为 cosine+warmup5（此前 HANDOFF 记录口吻为
+「论文附录 C：warmup 后降 lr（仓库 config 为 TwoStep：warmup60/5e-6）」未核实全文）；
+**实现口径维持仓库 config TwoStep**（票 06 已按此实现并测试；改 cosine 属用户决策，
+若对齐论文须改 train_kaggle 调度器 + 测试）。
+**速度差距结论（回答用户「为何 1501 帧(1 个仿真场)反而比 60,000 场慢」）**：训练时间 = 
+每 epoch 样本数 × epoch 数 × 每步耗时——**与数据集场数无关**（我们每 epoch 采样数固定配置）；
+每步 5s vs 论文 ~0.6s（按 14h/200epoch=4.2min/epoch 反推）来自 ① A100 vs T4×2 的 5-8× 硬件差
+（论文可开 TF32/AMP；A100 fp32 19.5 TFLOPS vs T4 8.1）、② 论文离线预生成样本张量（训练纯 GPU
+读缓存）vs 我们 on-the-fly CPU 提取（~0.9s/批）、③ DP 同步开销。Kaggle 免费层无 A100；已做最优
+（TF32 + samples 20000 → 预计 35-55h）；进一步预案：样本预缓存（消数据管线，~15-20%）/修 vendor 
+AMP（独立小票，改迁移忠实性）——目标 <20h 需 A100 级硬件。未决：调度器是否对齐论文 cosine 待用户决策。
