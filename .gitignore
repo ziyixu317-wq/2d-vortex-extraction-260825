@@ -21,6 +21,10 @@ runs/
 results/
 outputs/
 
+# Kaggle Dataset 打包产物（本地生成 → 上传 Kaggle，不进 git）
+kaggle_dataset_a/
+kaggle_dataset_a.zip
+
 # 系统
 .DS_Store
 Thumbs.db

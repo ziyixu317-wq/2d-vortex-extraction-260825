@@ -1,0 +1,103 @@
+# Kaggle 训练操作手册（票 07：上传与 200 epoch 训练）
+
+本手册是从本仓库到 Kaggle 完成 200 epoch 全量训练的**用户操作路径**。代码侧配套：
+
+| 文件 | 用途 |
+|---|---|
+| `kaggle/train_kaggle.ipynb` | Kaggle Notebook（导入后 Run All；自检/步速校准/分块训练/版本发布/收尾归档） |
+| `kaggle/prepare_dataset_a.py` | 本地打包 Dataset A（nc + prepare_dataset 产物 + manifest 审计） |
+| `kaggle/chunking.py` | 分块规划（12h 会话 → ≤8h/块，纯函数，有测试） |
+| `kaggle/self_check.py` | Notebook 环境自检（验收 1；本地可用 `--device cpu` 先验） |
+| `train_kaggle.py --report-f1` | 训练完成后记录 val 自然分布 F1（验收 4） |
+
+**谁能做哪步**：步骤 0（打包）与步骤 1（推送）在你本机普通终端做；步骤 2–5 在 Kaggle 网页做；步骤 6–7 在 Kaggle Notebook 中执行（每会话一块 ≤8h，总计约 3–4 个会话）。
+
+---
+
+## 0. 本地打包 Dataset A
+
+Dataset A = 原始 nc 数据 + 训练预处理产物（`outputs/dataset/` 的 meta.json + u/v/ivd/label/mask memmap ≈1.3GB + `outputs/weak_labels/` 目检图）。本机已跑过票 02–05 的预处理，直接打包：
+
+```powershell
+cd "C:\Users\徐子屹\Desktop\AI CFD\cylinder_vortex_pipeline"
+python kaggle\prepare_dataset_a.py --nc "..\CFD数据集\pipedcylinder2d.nc" `
+    --dataset-dir outputs\dataset --aux-dirs outputs\weak_labels `
+    --out kaggle_dataset_a --zip
+```
+
+产物：`kaggle_dataset_a/`（含 `manifest.json`：逐文件 sha256，供 Kaggle 端自检核对）与 `kaggle_dataset_a.zip`（≈2GB，Kaggle 网页可直接上传；`kaggle_dataset_a/` 与 zip 均不在 git 内，请勿提交）。
+
+## 1. 推送代码到 GitHub
+
+```
+git push -c http.sslBackend=openssl origin main
+```
+
+Kaggle Notebook 通过 `git clone https://github.com/ziyixu317-wq/2d-vortex-extraction-260825.git`
+获取代码（notebook 的 `REPO_URL` 变量）。仓库须为公开（训练不依赖私有凭据）。
+
+## 2. 创建 Kaggle Dataset（Dataset A）
+
+- 网页：Kaggle → Datasets → New Dataset → Upload 上传 `kaggle_dataset_a.zip`（或 API：`kaggle datasets create -p kaggle_dataset_a -t "2d vortex pathline transformer" -v`）。
+- 名称不限（notebook 自动探测含 `dataset/meta.json` 的 input）。公开/私有均可（训练非竞赛，私有即可）。
+
+## 3. 创建 Notebook 并配置运行环境
+
+1. Kaggle → Code → New Notebook → 上传 `kaggle/train_kaggle.ipynb`（File → Upload Notebook）。
+2. Notebook Settings：**Accelerator = GPU T4 x2**、**Internet = ON**。
+3. Add Input → 挂载第 2 步的 Dataset A。
+
+## 4.（可选）checkpoint 数据集与 secrets（跨会话自动续训，模式 A）
+
+1. Kaggle → Datasets → New Dataset：先建一个**空**数据集（占位 slug，如 `yourname/vortex-train-ckpt`），notebook 的 `CKPT_DATASET_SLUG` 填该 slug；
+2. Notebook → Add-ons → Secrets：添加 `KAGGLE_USERNAME` / `KAGGLE_KEY`（Kaggle 个人设置页生成 API key）→ Settings 里把两个 secret 挂到本 notebook；
+3. 之后笔记本内 `kaggle datasets version` 会在块尾自动发布新版本，下次会话 `kaggle datasets download --unzip` 自动还原 `outputs/train/`。
+
+不配置（模式 B，手动）则跳过：每次会话把上一会话的 `ckpt_snapshot.zip`（在 `/kaggle/working`，会话结束前下载）上传为 Dataset 并 Add Input；或挂载上一会话输出的 checkpoint 目录。
+
+## 5. 执行（Run All）
+
+每个 cell 的作用与产物：
+
+| Cell | 作用 | 产物/输出（/kaggle/working/repo 下） |
+|---|---|---|
+| 1 | 安装 h5py/yaml/matplotlib/tqdm/kaggle | 版本打印 |
+| 2 | git clone 代码 | `repo/` |
+| 3 | 挂载 Dataset A + 还原 checkpoint | `outputs/dataset/`（symlink） |
+| 4 | **验收 1**：环境自检（vendor import + 数据加载 + 模型前向） | 自检打印 |
+| 5 | **验收 2**：1 epoch 实测步速（全量 40000 样本） | `outputs/bench_info.json` + 分块计划 |
+| 6 | **验收 3**：分块训练（本块 1 块；`--resume auto` 续训） | `outputs/train/*ckpt_latest.pth` 每 epoch + E 里程碑 |
+| 7 | 块尾打包（模式 A 发布 Dataset 新版本 / 模式 B 手动下载） | `ckpt_snapshot.zip` |
+| 8 | **验收 4**：训练完成后打印 val F1 + 最终归档 | `final_ckpt.zip` + `val_f1.json` |
+
+**每会话一块**（`CHUNK_BUDGET_H=7.5h`，来自 12h 硬上限留自检/打包余量；`kaggle/chunking.py` 的 `plan_chunks` 是参数化纯函数——其测试用 8h 预算仅为算例，notebook 实际传 7.5h）；块尾打包 checkpoint 后本会话结束——**重启会话再 Run All** 即从 latest 无损续训（`--resume auto`：checkpoint 含 optimizer/scheduler 状态，采样序按 (seed, epoch) 确定性重建）。预计约 3–4 个会话完成 200 epoch。
+
+## 6. 收尾与回填
+
+200 epoch 完成后（cell 6 输出 `progress()==200`，cell 8 打出 val F1 json）：
+
+1. 下载 `final_ckpt.zip` → 本机 `outputs/archive/`（gitignore，勿提交）；
+2. 从 `val_f1.json` 与 `bench_info.json` 回填：
+   - 票文件 `07-kaggle-training.md`：四个验收项勾选 + 完成记录（val F1、步速、checkpoint 位置）；
+   - HANDOFF §6 参数表 / §5 阶段 5 判据：epoch 样本数校准结论、val F1 记录；
+   - HANDOFF §11：追加变更日志条目（训练完成事实、分块数与耗时）；
+3. 之后按 frontier 启动票 08（推理评估，依赖 07）。
+
+## 7. 故障排查
+
+| 现象 | 处置 |
+|---|---|
+| Cell 3 断言失败：未找到 Dataset A | 检查 Add Input 是否挂载、zip 内是否含 `dataset/meta.json`（用 manifest.json 核对） |
+| `git clone` 失败 | Internet 未开；仓库 URL/可见性；clone 后手动 `os.chdir` 再 Run All |
+| 步速校准远超 7.5h/块 | 属预期（单 epoch > 预算时每块至少 1 epoch）；可降 `samples_per_epoch`（下限 20000，HANDOFF §6）或启用 YAML `amp/data_parallel` |
+| 会话断在训练中途 | `ckpt_latest.pth` 每 epoch 更新；重启会话 Run All 自动续（loss 从该 epoch 位置继续） |
+| `kaggle datasets version` 报错 | API key 缺 scope（须 Create+Read+Write）/ slug 拼写 / 数据集不存在（先建占位） |
+| 磁盘不足（/kaggle/working 12GB） | `outputs/bench` 与 `outputs/train` 各占几 MB~数百 MB；memmap 走 symlink（不复制）；必要时删 `outputs/bench` |
+| 想要确定步速上限做预分配 | 参考 HANDOFF §5：T4 单卡 0.8~1.3s/步 → 40000 样本/100 batch = 400 步/epoch → 5.3~8.7 min/epoch |
+
+## 8. 相关约束（HANDOFF 摘录，实现已对齐）
+
+- 训练口径：AdamW(wd 1e-6)、lr 1e-4、TwoStep（warmup 60 → 5e-6）、batch 100、200 epoch、梯度裁剪 1.0、BCE（HANDOFF §2 论文附录 C / §6）；
+- 每 epoch checkpoint（含 optimizer 状态）是跨会话无损续训的硬性要求（HANDOFF §7 风险预案）；
+- 数据一律 h5py/memmap 直读（中文路径：本地打包即走 h5py；Kaggle 路径 ASCII 无此问题）；
+- val 损失口径 = 训练同款 50% 平衡采样（监控）；val F1 = 自然分布（池比例），属票 07 验收记录，正式弱定量表在票 08。

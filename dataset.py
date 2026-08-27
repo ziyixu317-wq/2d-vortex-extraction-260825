@@ -443,7 +443,6 @@ class WeakLabelPathlineDataset:
             for i in usable_idx:
                 (y0, x0) = self._patches[i]
                 (pos if pm_flat[i] else neg).append((y0, x0, int(frame)))
-        self._pool_pos, self._pool_neg = pos, neg
         return pos, neg
 
     # ---------------- 确定性种子（重播种后；__getitem__/标签判定的判据）
@@ -507,22 +506,34 @@ class WeakLabelPathlineDataset:
         rng = np.random.default_rng(np.random.SeedSequence([self.seed, self._epoch]))
         n_pos = int(round(self.samples_per_epoch * self.positive_fraction))
         n_neg = self.samples_per_epoch - n_pos
-        if not self._pool_pos:
+        if not self.pool_positive:
             raise ValueError(
                 "正样本池为空：数据集中无正 patch（检查 τ/标签场/时间片）")
-        if n_neg > 0 and not self._pool_neg:
+        if n_neg > 0 and not self.pool_negative:
             raise ValueError("负样本池为空（样本池不完整）")
-        pick_p = np.asarray(self._pool_pos, dtype=np.int64)
-        pick_n = np.asarray(self._pool_neg, dtype=np.int64)
-        pidx = pick_p[rng.integers(0, len(self._pool_pos), size=n_pos)]
+        pick_p = np.asarray(self.pool_positive, dtype=np.int64)
+        pick_n = np.asarray(self.pool_negative, dtype=np.int64)
+        pidx = pick_p[rng.integers(0, len(self.pool_positive), size=n_pos)]
         if n_neg:
-            nidx = pick_n[rng.integers(0, len(self._pool_neg), size=n_neg)]
+            nidx = pick_n[rng.integers(0, len(self.pool_negative), size=n_neg)]
             order = np.concatenate([pidx, nidx])
         else:
             order = pidx
         rng.shuffle(order)
         self._order = [tuple(int(x) for x in c) for c in order]
         return self._order
+
+    def set_epoch_natural(self, epoch=0):
+        """按池自然比例（正/负池大小比）重建采样序——自然分布评估口径。
+
+        训练监控用 50% 平衡（set_epoch）；自然分布（真实正负占比）用于训练
+        收尾的 val F1 记录（票 07 验收 4；正式弱定量表属票 08）。
+        """
+        n_pos = len(self.pool_positive)
+        n_neg = len(self.pool_negative)
+        total = n_pos + n_neg
+        self.positive_fraction = n_pos / total if total > 0 else 0.5
+        return self.set_epoch(int(epoch))
 
     # ---------------- __getitem__
 

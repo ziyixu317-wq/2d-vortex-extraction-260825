@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 
 import numpy as np
@@ -186,6 +187,37 @@ def evaluate(model, loader, criterion, device, max_steps=None):
     return total / n
 
 
+@torch.no_grad()
+def evaluate_f1(model, loader, device, threshold=0.5, max_steps=None):
+    """自然分布 val 片上的 F1 评估（训练收尾的 val F1 记录，票 07 验收 4）。
+
+    口径：模型输出 sigmoid 概率 > threshold 判正（默认 0.5）；与弱标签逐迹线
+    0/1 求混淆矩阵 → precision/recall/F1。自然分布指采样序的正负比例 = 池比例
+    （非训练同款 50% 平衡；平衡采样是训练监控口径，自然分布为真实精度观察口径，
+    正式弱定量表属票 08）。
+    返回 dict：tp/fp/fn/tn/precision/recall/f1/n（n = 评估迹线总数）。
+    """
+    model.eval()
+    tp = fp = fn = tn = n = 0
+    for batch in _iter_batches(loader, max_steps):
+        ((dummy, pathlines), labels) = _to_device(batch, device)
+        pred = model((dummy, pathlines))
+        pred_b = pred > float(threshold)
+        tp += int(((pred_b) & (labels == 1)).sum().item())
+        fp += int(((pred_b) & (labels == 0)).sum().item())
+        fn += int(((~pred_b) & (labels == 1)).sum().item())
+        tn += int(((~pred_b) & (labels == 0)).sum().item())
+        n += int(labels.numel())
+    if n == 0:
+        raise ValueError("loader 为空：F1 评估无样本可跑")
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    return {"tp": tp, "fp": fp, "fn": fn, "tn": tn,
+            "precision": float(precision), "recall": float(recall),
+            "f1": float(f1), "n": n}
+
+
 # --------------------------------------------------------------------------- checkpoint（断点续训）
 
 def _strip_module_prefix(state_dict):
@@ -271,6 +303,8 @@ def main(argv=None):
                     help="覆盖 train.epochs（Kaggle 分块 ≤8h 用）")
     ap.add_argument("--max-steps", type=int, default=None,
                     help="每 epoch 最多训练步数（CPU 冒烟 1~2 步用）")
+    ap.add_argument("--report-f1", action="store_true",
+                    help="训练完成后在 val 片记录自然分布 F1（val_f1.json，票 07 验收 4）")
     args = ap.parse_args(argv)
 
     config = load_config(args.config)
@@ -355,6 +389,24 @@ def main(argv=None):
         if save_freq > 0 and (epoch + 1) % save_freq == 0:
             save_ckpt(ckpt_dir / f"{run_name}_E{epoch + 1}.pth", model, optimizer,
                       scheduler, epoch=epoch, metrics=metrics, config=config)
+
+    # ---- 训练完成 → val 自然分布 F1 记录（票 07 验收 4；--report-f1 显式开关）
+    if args.report_f1 and val_loader is not None:
+        val_ds.set_epoch_natural(0)      # 自然分布序（正负比例 = val 池比例；
+                                         # 池空时 set_epoch fail loud——数据异常不静默）
+        f1_loader = _make_loader(val_ds, data_cfg["batch_size"],
+                                 data_cfg.get("num_workers", 0), device)
+        f1_metrics = evaluate_f1(model, f1_loader, device)
+        f1_blob = {"epoch": int(train_cfg["epochs"]) - 1, "split": val_split,
+                   "threshold": 0.5, **f1_metrics}
+        f1_path = ckpt_dir / f"{run_name}_val_f1.json"
+        f1_path.write_text(json.dumps(f1_blob, indent=2, ensure_ascii=False),
+                           encoding="utf-8")
+        print(f"[train] val F1（自然分布，{val_split}）："
+              f"F1={f1_metrics['f1']:.4f} P={f1_metrics['precision']:.4f} "
+              f"R={f1_metrics['recall']:.4f} "
+              f"(tp={f1_metrics['tp']} fp={f1_metrics['fp']} "
+              f"fn={f1_metrics['fn']} n={f1_metrics['n']}) → {f1_path}")
     return 0
 
 
