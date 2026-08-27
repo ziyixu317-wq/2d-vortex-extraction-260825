@@ -88,6 +88,7 @@ Kaggle Notebook 通过 `git clone https://github.com/ziyixu317-wq/2d-vortex-extr
 | 现象 | 处置 |
 |---|---|
 | Cell 3 断言失败：未找到 Dataset A | 检查 Add Input 是否挂载、zip 内是否含 `dataset/meta.json`（用 manifest.json 核对） |
+| 报 `No module named 'dataset'`（路径含 `/kaggle/src/script.py`） | 运行的不是 Notebook 全流程：请用 Notebook 页面（File → Upload Notebook 上传 `train_kaggle.ipynb` → Run All）。`train_kaggle.py` 不是独立入口——它依赖同目录 `dataset.py`/`vendor/`，notebook 的 git clone + `sys.path` 自举才提供这些；Script 单文件环境无此结构 |
 | `git clone` 失败 | Internet 未开；仓库 URL/可见性；clone 后手动 `os.chdir` 再 Run All |
 | 步速校准远超 7.5h/块 | 属预期（单 epoch > 预算时每块至少 1 epoch）；可降 `samples_per_epoch`（下限 20000，HANDOFF §6）或启用 YAML `amp/data_parallel` |
 | 会话断在训练中途 | `ckpt_latest.pth` 每 epoch 更新；重启会话 Run All 自动续（loss 从该 epoch 位置继续） |
