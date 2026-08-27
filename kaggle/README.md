@@ -61,7 +61,7 @@ Kaggle Notebook 通过 `git clone https://github.com/ziyixu317-wq/2d-vortex-extr
 
 | Cell | 作用 | 产物/输出（/kaggle/working/repo 下） |
 |---|---|---|
-| 1 | 安装 h5py/yaml/matplotlib/tqdm/kaggle | 版本打印 |
+| 1 | 安装 h5py/PyYAML/matplotlib/tqdm/kaggle | 版本打印 |
 | 2 | git clone 代码 | `repo/` |
 | 3 | 挂载 Dataset A + 还原 checkpoint | `outputs/dataset/`（symlink） |
 | 4 | **验收 1**：环境自检（vendor import + 数据加载 + 模型前向） | 自检打印 |
