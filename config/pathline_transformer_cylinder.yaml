@@ -1,0 +1,61 @@
+# 迹线 Transformer 涡提取 —— 训练配置（06 票：训练脚本）
+#
+# 全部超参的单一来源（HANDOFF §2 模型事实/论文附录 C、§6 参数表、规格 Implementation
+# Decisions）。Kaggle 训练时本文件随 Dataset B（整个 pipeline 目录）上传。
+#
+# 模型段沿用官方 config/segmentation/pathline_transformer.yaml 形态（BaseSeg 包装
+# PathlineTransformerV0 + BCELoss），口径按产品决策 6 调整：KpathlinePerGroup=4、
+# PathlineGroups=64（256 条/样本）。
+
+# ---------------------------------------------------------------------------- 数据
+data:
+  root: outputs/dataset          # prepare_dataset 产物目录（meta.json + memmap）
+  split: train                   # 训练片（HANDOFF §6：train [0,10]s）
+  val_split: val                 # 验证片（(10,12.5]s）；val 损失按训练同款 50% 平衡
+                                 # 采样口径监控（自然分布精度评估属票 08 弱定量表）
+  batch_size: 100
+  num_workers: 8                 # Kaggle Linux 多进程；本地 CPU 冒烟用 0
+  samples_per_epoch: 40000       # HANDOFF §6：默认 40000、下限 20000
+  positive_fraction: 0.5         # 50% 正样本过采样（训练抗失衡）
+  patch_size: [32, 32]
+  stride: [16, 16]
+  t_win: 24
+  window_step: 4
+  t_scale: 0.25                  # KNN 时空混合度量中 t 的权重
+  groups: [8, 8]                 # 十字采样组网格（8×8=64 组 × 4 卫星 = 256 条）
+  delta_frac: 0.05               # 卫星偏移 Δ = patch 边长 × 0.05
+  L: 16                          # 迹线时间采样点数（窗口 T_win 内）
+  n_substeps: 4                  # RK4 每输出步子步数
+  seed: 0
+
+# ---------------------------------------------------------------------------- 模型
+model:
+  NAME: BaseSeg                  # 官方包装：encoder + criterion（forward → 编码器输出）
+  encoder_args:
+    NAME: PathlineTransformerV0
+    in_channels: 7               # [px, py, t, ivd, distance, u, v]
+    PathlineGroups: 64           # 8×8 采样组（决策 6）
+    KpathlinePerGroup: 4         # 轴向卫星点（不含中心；4×64=256 条/样本）
+    num_classes: 1
+    num_encoder_layers: 3
+    dmodel: 144                  # 官方 config 取值（raw_pos_embedding 需 dmodel%2==0）
+    k: 16                        # KNN 邻居数
+  criterion_args:
+    NAME: BCELoss                # 模型输出 sigmoid 概率 → 与 0/1 弱标签的 BCE
+
+# ---------------------------------------------------------------------------- 训练
+train:
+  epochs: 200
+  lr: 0.0001                     # 论文附录 C
+  weight_decay: 0.000001         # AdamW(wd 1e-6)
+  warmup_epochs: 60              # TwoStep 第一段（恒 lr；warmup 名称沿用官方）
+  second_lr: 0.000005            # TwoStep 第二段（epoch ≥ 60）
+  grad_clip: 1.0                 # 梯度裁剪范数
+  val_freq: 5                    # 每 N epoch 跑一次 val loss
+  save_freq: 30                  # 里程碑快照频率（原仓库取值）；latest 仍每 epoch 更新
+  seed: 0
+  device: auto                   # auto = cuda 可用则 cuda（Kaggle T4），否则 cpu
+  amp: false                     # AMP（Kaggle T4×2 可选）
+  data_parallel: false           # DataParallel（Kaggle T4×2 可选）
+  ckpt_dir: outputs/train
+  run_name: pathline_transformer_cylinder
