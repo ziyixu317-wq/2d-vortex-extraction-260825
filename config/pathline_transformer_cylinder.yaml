@@ -55,8 +55,10 @@ train:
   save_freq: 30                  # 里程碑快照频率（原仓库取值）；latest 仍每 epoch 更新
   seed: 0
   device: auto                   # auto = cuda 可用则 cuda（Kaggle T4），否则 cpu
-  amp: true                      # AMP（Kaggle T4×2 实测 batch100 前向 13.5GB 激活
-                                 # 超单卡 16GB → 默认启用；本地 CPU 路径不受影响）
-  data_parallel: true            # DataParallel（Kaggle T4×2 自动生效；单卡自动跳过）
+  amp: false                     # 关闭：上游模型 propagate_features 原地 index-put
+                                 # 在 AMP(Half) 下 dtype 冲突（实测 RuntimeError；
+                                 # 迁移忠实性不允许改 vendor）→ 显存用 DP 拆分解决
+  data_parallel: true            # DataParallel（Kaggle T4×2 自动生效：batch 100 →
+                                 # 每卡 50 ≈ 6.8GB 峰值 < 16GB；单卡自动跳过）
   ckpt_dir: outputs/train
   run_name: pathline_transformer_cylinder

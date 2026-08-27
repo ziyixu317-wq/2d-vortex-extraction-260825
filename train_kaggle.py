@@ -367,7 +367,9 @@ def main(argv=None):
     val_freq = int(train_cfg.get("val_freq", 5))
     save_freq = int(train_cfg.get("save_freq", 30))
     use_amp = bool(train_cfg.get("amp")) and device.type == "cuda"
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp) if use_amp else None
+    # torch.amp.GradScaler('cuda')：2.10 起 cuda.amp.GradScaler 为 deprecated API（警告）；
+    # 本地 CPU 路径 enabled=False 构造无害
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_amp else None
     for epoch in range(start_epoch, int(train_cfg["epochs"])):
         train_ds.set_epoch(epoch)
         lr = scheduler.step(epoch)
