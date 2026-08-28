@@ -445,14 +445,26 @@ class TestBuildDatasetA:
         manifest = build_dataset_a_multi([(str(nc1), str(ds1)), (str(nc2), str(ds2))],
                                          str(out))
         for rel in ("data/boussinesq.nc", "data/cylinder2d.nc",
-                    "datasets/ds1/meta.json", "datasets/ds2/meta.json",
-                    "datasets/ds2/u.npy"):
+                    "datasets/ds1/dataset/meta.json", "datasets/ds2/dataset/meta.json",
+                    "datasets/ds2/dataset/u.npy"):
             assert (out / rel).exists(), rel
         m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         assert m["total_bytes"] > 0
         for f in m["files"]:
             assert (out / f["path"]).exists()
         assert not (out / "dataset").exists()          # 单数据集布局不混用
+
+    def test_multi_standard_prepare_layout(self, tmp_path):
+        """标准 prepare_dataset 布局（<数据集名>/dataset/）：打包名取父目录名，
+        zip 内路径 = datasets/<名>/dataset/...（与 config root 布局一致）。"""
+        from kaggle.prepare_dataset_a import build_dataset_a_multi
+        nc = tmp_path / "fourcenters2d.nc"; nc.write_bytes(b"NC")
+        ds = make_fake_dataset_dir(tmp_path / "fourcenters2d" / "dataset")
+        out = tmp_path / "out_std"
+        manifest = build_dataset_a_multi([(str(nc), str(ds))], str(out))
+        assert (out / "datasets" / "fourcenters2d" / "dataset" / "meta.json").exists()
+        assert any(f["path"] == "datasets/fourcenters2d/dataset/u.npy"
+                   for f in manifest["files"])
 
     def test_multi_skip_nc_layout(self, tmp_path):
         """--skip-nc 多数据集打包：无 data/（省空间），datasets/ 布局与 manifest 正常。"""
@@ -464,7 +476,7 @@ class TestBuildDatasetA:
         manifest = build_dataset_a_multi([(str(nc), str(ds1))], str(out),
                                          include_nc=False)
         assert not (out / "data").exists()
-        assert (out / "datasets" / "ds1" / "meta.json").exists()
+        assert (out / "datasets" / "ds1" / "dataset" / "meta.json").exists()
         m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         assert m["include_nc"] is False
         assert all("data/" not in f["path"] for f in m["files"])

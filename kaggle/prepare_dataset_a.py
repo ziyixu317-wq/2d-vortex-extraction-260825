@@ -52,15 +52,17 @@ def build_dataset_a_multi(pairs, out_dir, include_nc=True):
             raise FileNotFoundError(f"nc 数据文件不存在: {nc_path}")
         if not ds_src.exists():
             raise FileNotFoundError(f"prepare_dataset 产物目录不存在: {ds_src}")
-        if include_nc:
-            files.append((pathlib.Path("data") / nc_path.name, nc_path))
-        name = ds_src.name
+        # 数据集名 = 产物目录名（prepare_dataset 标准布局为 <数据集名>/dataset，
+        # 此时取父目录名 boussinesq 等）；同名冲突 fail loud（manifest 路径歧义）
+        name = ds_src.parent.name if ds_src.name == "dataset" else ds_src.name
         if name in used_names:
             raise ValueError(f"数据集目录名重复: {name}（manifest 路径歧义）")
         used_names.add(name)
+        if include_nc:
+            files.append((pathlib.Path("data") / nc_path.name, nc_path))
         for p in sorted(ds_src.rglob("*")):
             if p.is_file():
-                files.append((pathlib.Path("datasets") / name
+                files.append((pathlib.Path("datasets") / name / "dataset"
                               / p.relative_to(ds_src), p))
 
     manifest_files = []
