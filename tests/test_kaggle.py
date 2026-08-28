@@ -454,6 +454,21 @@ class TestBuildDatasetA:
             assert (out / f["path"]).exists()
         assert not (out / "dataset").exists()          # 单数据集布局不混用
 
+    def test_multi_skip_nc_layout(self, tmp_path):
+        """--skip-nc 多数据集打包：无 data/（省空间），datasets/ 布局与 manifest 正常。"""
+        import json
+        from kaggle.prepare_dataset_a import build_dataset_a_multi
+        nc = tmp_path / "boussinesq.nc"; nc.write_bytes(b"NC1")
+        ds1 = make_fake_dataset_dir(tmp_path / "ds1")
+        out = tmp_path / "out_skip"
+        manifest = build_dataset_a_multi([(str(nc), str(ds1))], str(out),
+                                         include_nc=False)
+        assert not (out / "data").exists()
+        assert (out / "datasets" / "ds1" / "meta.json").exists()
+        m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+        assert m["include_nc"] is False
+        assert all("data/" not in f["path"] for f in m["files"])
+
     def test_multi_pairs_mismatch_raises(self, tmp_path):
         """--nc 与 --dataset-dir 个数不匹配 → ValueError（防错配静默）。"""
         from kaggle.prepare_dataset_a import main as pa_main

@@ -55,7 +55,7 @@
 
 **/code-review 双轴处置**：见会话记录（Standards/Spec 各发现均已处置；本段不重复）。
 
-**用户执行（延伸部分）**：① git push（本延伸 commit）；② 本地重新打包 Dataset A（单数据集 p85：`--dataset-dir outputs\dataset`；多数据集：§7 命令）；③ Kaggle 两条训练线任选或都跑：单数据集重训（p85 标签，`--config config/pathline_transformer_cylinder.yaml`）与多数据集联合训练（`--config config/pathline_transformer_multi.yaml --report-f1 --f1-split test`，notebook 按 README §7 适配挂载）；④ 回填 HANDOFF §6 实测值与 §11。
+**用户执行（延伸部分）**：① git push（本延伸 commit + notebook 更新 commit）；② 重新上传 **notebook 一次**（cell 3 已自动适配单/多布局，cells 6/8/9 run_name 参数化——两条线共用）；③ 重新打包上传 Dataset A（单数据集 p85 标签 staging 已本地重建；多数据集打包命令见 README §7，磁盘不足加 `--skip-nc`）；④ Kaggle 两条训练线任选或都跑：单数据集重训（p85 标签，从零——勿挂旧 p95 ckpt 数据集，`--config config/pathline_transformer_cylinder.yaml`）与多数据集联合训练（`--config config/pathline_transformer_multi.yaml --report-f1 --f1-split test`）；⑤ 回填 HANDOFF §6 实测值与 §11。
 
 **执行边界**：新 τ 标签重训与多数据集 200 epoch 训练/留出评估级记录 = 用户 Kaggle 执行（本会话交付代码/产物/文档与本地 CPU 验证）；正式弱定量表（网格投影级、多帧/动画）属票 08。
 

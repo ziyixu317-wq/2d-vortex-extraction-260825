@@ -105,18 +105,20 @@ Kaggle Notebook 通过 `git clone https://github.com/ziyixu317-wq/2d-vortex-extr
 
 ## 7. 多数据集联合训练（票 07 延伸）
 
-本地已交付：7 数据集逐数据集预处理（`outputs/datasets/<名>/{geometry,dataset,previews}` + `multi_meta.json`，≈3.8GB）、`config/pathline_transformer_multi.yaml`（data.root 列表、frac 60/40、val_split none）。Kaggle 侧执行：
+本地已交付：7 数据集逐数据集预处理（`outputs/datasets/<名>/{geometry,dataset,previews}` + `multi_meta.json`，≈3.8GB）、`config/pathline_transformer_multi.yaml`（data.root 列表、frac 60/40、val_split none）。**Notebook 已自动适配**（`train_kaggle.ipynb` cell 3：单/多数据集布局自动探测 → 自动选 config + 逐目录链接 `outputs/datasets/<名>/`，cells 6/8/9 的 run_name 已参数化）——**重新上传 notebook 一次即可**，之后单/多两条线都不用改 cell。Kaggle 侧执行：
 
 ```powershell
 # 0. 本地打包 Dataset A（多对：nc 与数据集目录一一对应，布局 data/<nc> + datasets/<名>/）
 python kaggle\prepare_dataset_a.py --nc <7 个 nc 路径> --dataset-dir <7 个 outputs\datasets\*\dataset> `
     --out kaggle_dataset_a_multi --zip
+# 磁盘不足时：加 --skip-nc 省略原始 nc（Kaggle 训练只用 memmap，省 ~3.6GB/省上传体积；
+#                 nc 仅为重算来源；notebook 布局探测不受影响）
 ```
 
-Notebook 适配（在 `train_kaggle.ipynb` cell 3 挂载探测处多一层）：Dataset A 内布局为
-`data/<nc>` + `datasets/<名>/dataset/meta.json`——把挂载根下的 `datasets/*` 逐目录
-symlink 到 `repo/outputs/datasets/<名>`（**数据集名 slug 与本地目录名一致化**），
-再执行 cell 4-9 其余流程；cell 9 预览加 `--dataset <索引>`（多 root 配置下选数据集）。
+Notebook 适配（已在 ipynb 内自动完成，无需手动改）：cell 3 探测 `datasets/` 目录 →
+`config/pathline_transformer_multi.yaml` + 逐数据集 symlink；单数据集布局（`dataset/meta.json`）
+则走原路径。**注意**：Kaggle 上传数据集名（slug 含多级目录）与本地目录名需一致化——
+打包的 `datasets/<名>/` 名即本地 `outputs/datasets/<名>` 名，zip 内布局即最终布局。
 
 训练与留出评估（cell 6 训练命令）：
 
