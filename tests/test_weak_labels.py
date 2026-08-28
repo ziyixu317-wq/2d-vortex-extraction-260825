@@ -230,26 +230,40 @@ class TestMinAreaFilter:
         assert out.sum() == 0        # 18 < 25
 
 
-# ================================================================ 切片 6：τ（逐时间片 95 分位）
+# ================================================================ 切片 6：τ（逐时间片 85 分位）
 
 class TestTau:
-    """τ = 100−percentile 分位（默认 95），逐时间片；分位数在流体区（排除固体 0 值）。"""
+    """τ = 按 percentile 分位（默认 85——票 07 延伸定案：p95 弱标签相比论文
+    Fig.6 列 1 捕获稀疏 → 下探至 p85；HANDOFF §6 已回写），逐时间片；分位数在
+    流体区（排除固体 0 值）。"""
+
+    def test_default_percentile_is_85(self):
+        """τ 默认 = 流体区 85 分位。字面量：1..100 均匀值线性插值 85 分位
+        = 84.15 索引插值 = 85.15（独立手算，不重算实现公式）。"""
+        from weak_labels import compute_tau
+        ivd = np.arange(1, 101, dtype=np.float64).reshape(1, 10, 10)
+        mask = np.zeros((10, 10), dtype=bool)
+        taus = compute_tau(ivd, mask, {"train": (0, 1)})
+        assert taus["train"] == pytest.approx(85.15)
 
     def test_95_percentile_literal(self):
-        """20 个值 0..19（无固体）：p95 = (n−1)×0.95 = 18×0.95 = 18.05（线性插值字面量）。"""
+        """20 个值 0..19（无固体）：p95 = (n−1)×0.95 = 18×0.95 = 18.05（线性插值字面量）。
+        显式 percentile=95.0（默认已改 85——票 07 延伸）。"""
         ivd = np.arange(20.0).reshape(1, 1, 20)
         mask = np.zeros((1, 20), dtype=bool)
-        tau = weak_labels.compute_tau(ivd, mask, {"train": (0, 1)})["train"]
+        tau = weak_labels.compute_tau(ivd, mask, {"train": (0, 1)},
+                                      percentile=95.0)["train"]
         assert tau == pytest.approx(18.05)
 
     def test_tau_excludes_solid(self):
         """固体区不进入分位数：流体 20 值 0..19 + 固体 1000 个 0（IVD 已置零）
-        → p95 仍 = 18.05；若把固体 0 计入则 p95≈0（污染）。"""
+        → p95 仍 = 18.05；若把固体 0 计入则 p95≈0（污染）。显式 percentile=95.0。"""
         ivd = np.zeros((1, 41, 1000), dtype=np.float64)   # 40 行固体+1 行流体，1000 列
         ivd[0, 0, :] = np.arange(1000.0)                  # 流体 1000 值 0..999
         mask = np.ones((41, 1000), dtype=bool)
         mask[0, :] = False                                # 仅第 0 行流体
-        tau = weak_labels.compute_tau(ivd, mask, {"train": (0, 1)})["train"]
+        tau = weak_labels.compute_tau(ivd, mask, {"train": (0, 1)},
+                                      percentile=95.0)["train"]
         # 流体 p95 = 0.95×999 = 949.05（字面量）
         assert tau == pytest.approx(949.05)
 
@@ -419,6 +433,65 @@ class TestPlot:
             str(tmp_path / "tau.png"), percentiles=(90.0, 95.0, 97.5, 99.0),
             title="synth")
         assert pathlib.Path(p).exists() and pathlib.Path(p).stat().st_size > 0
+
+
+# ================================================================ 切片 10：多阈值敏感性报告（票 07 延伸）
+
+# 合成场字面量：80×80 帧，IVD=0 背景 + 32×32 高值块（1024 格，> 5×5 过滤）
+# → 任一 min_area：正格 1024/6400、1 个连通块。
+# 种子判据阳性 patch = 4 个（y0,x0 ∈ {0,16} 的 2×2——种子 y∈[3.2,28.8] 全落大块内，
+# y0=16 时仍与块交叠，y0≥32 时种子 y≥35.2 出块）→ pos_patch_fraction = 4/16 = 0.25。
+class TestMultiTauReport:
+    """多阈值敏感性报告（HANDOFF §7 预案「多阈值敏感性报告」的落地）：
+    各候选 τ 的覆盖率/连通块数/正样本占比统计 + 目检图（含论文风格白色等值线）。"""
+
+    def synth_ivd(self, T=4):
+        ivd = np.zeros((T, 80, 80), dtype=np.float64)
+        ivd[:, 0:32, 0:32] = 10.0          # 大块（1024 格 ≥ 25）
+        return ivd
+
+    def test_compute_tau_candidates(self):
+        """候选构造：分位配置 → {片: τ}；固定配置 → 标量（字面量 85.15/95.15/1.5）。"""
+        ivd = np.arange(1, 101, dtype=np.float64).reshape(1, 10, 10)
+        mask = np.zeros((10, 10), dtype=bool)
+        cfgs = weak_labels.compute_tau_candidates(
+            ivd, mask, {"train": (0, 1)}, percentiles=(85.0, 95.0),
+            fixed_values=(1.5,))
+        assert cfgs["p85"] == {"train": pytest.approx(85.15)}
+        assert cfgs["p95"] == {"train": pytest.approx(95.05)}
+        assert cfgs["fixed1.5"] == 1.5
+
+    def test_report_stats_literals(self, tmp_path):
+        """统计字面量（独立手算）：fixed τ=5 → 全部 min_area 正格 1024/6400、
+        1 个连通块；正 patch 占比 4/16（4 帧 × 16 patch 位）。"""
+        ivd = self.synth_ivd()
+        mask2d = np.zeros((80, 80), dtype=bool)
+        report = weak_labels.multi_tau_report(
+            ivd, mask2d, {"A": (0, 4)}, np.arange(80.0), np.arange(80.0),
+            str(tmp_path), percentiles=(), fixed_values=(5.0,),
+            min_areas=(25, 9, 1), display_frames=(0,), sample_step=1,
+            frame_step=1, title="synth")
+        s = report["stats"]["fixed5"]
+        for ma in (25, 9, 1):
+            assert s[f"pos_cell_frac_ma{ma}"] == pytest.approx(1024 / 6400)
+            assert s[f"mean_n_components_ma{ma}"] == pytest.approx(1.0)
+        pa = s["pos_patch_fraction_all"]
+        assert pa["n_patches"] == 16 * 4                            # 4 帧 × 16 patch
+        assert pa["fraction"] == pytest.approx(4 / 16)
+        assert (tmp_path / "multi_tau_stats.json").exists()
+
+    def test_report_pngs_saved(self, tmp_path):
+        """目检图落盘：填充标签对比（每 min_area 一行）+ 论文风格白色等值线。"""
+        ivd = self.synth_ivd(T=2)
+        mask2d = np.zeros((80, 80), dtype=bool)
+        rep = weak_labels.multi_tau_report(
+            ivd, mask2d, {"A": (0, 2)}, np.arange(80.0), np.arange(80.0),
+            str(tmp_path), percentiles=(), fixed_values=(5.0,),
+            min_areas=(25, 1), display_frames=(0,))
+        for name in ("multi_tau_filled_t0.png", "multi_tau_isocontour_t0.png"):
+            p = tmp_path / name
+            assert p.exists() and p.stat().st_size > 0
+        assert rep["out_dir"] == str(tmp_path)
 
 
 # ================================================================ 真实数据（HANDOFF §2 已核实事实）

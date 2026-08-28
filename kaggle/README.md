@@ -103,7 +103,41 @@ Kaggle Notebook 通过 `git clone https://github.com/ziyixu317-wq/2d-vortex-extr
    - HANDOFF §11：追加变更日志条目（训练完成事实、分块数与耗时）；
 3. 之后按 frontier 启动票 08（推理评估，依赖 07）。
 
-## 7. 故障排查
+## 7. 多数据集联合训练（票 07 延伸）
+
+本地已交付：7 数据集逐数据集预处理（`outputs/datasets/<名>/{geometry,dataset,previews}` + `multi_meta.json`，≈3.8GB）、`config/pathline_transformer_multi.yaml`（data.root 列表、frac 60/40、val_split none）。Kaggle 侧执行：
+
+```powershell
+# 0. 本地打包 Dataset A（多对：nc 与数据集目录一一对应，布局 data/<nc> + datasets/<名>/）
+python kaggle\prepare_dataset_a.py --nc <7 个 nc 路径> --dataset-dir <7 个 outputs\datasets\*\dataset> `
+    --out kaggle_dataset_a_multi --zip
+```
+
+Notebook 适配（在 `train_kaggle.ipynb` cell 3 挂载探测处多一层）：Dataset A 内布局为
+`data/<nc>` + `datasets/<名>/dataset/meta.json`——把挂载根下的 `datasets/*` 逐目录
+symlink 到 `repo/outputs/datasets/<名>`（**数据集名 slug 与本地目录名一致化**），
+再执行 cell 4-9 其余流程；cell 9 预览加 `--dataset <索引>`（多 root 配置下选数据集）。
+
+训练与留出评估（cell 6 训练命令）：
+
+```bash
+python train_kaggle.py --config config/pathline_transformer_multi.yaml \
+    --resume auto --epochs <块目标>          # 与单数据集同分块/续训机制
+# 训练完成后（收尾 cell 8）留出 40% 自然分布 F1/IoU：
+python train_kaggle.py --config config/pathline_transformer_multi.yaml \
+    --epochs <当前进度> --report-f1 --f1-split test   # → outputs/train_multi/*_test_f1.json
+```
+
+无 val 片（60/40）→ 训练期 val_loss 监控自动跳过（"数据集无 'val' 时间片"警告）；
+留出评估指标 = **F1 + IoU**（`evaluate_f1`，自然分布序）；`--f1-split` 指定的片不存在时
+fail loud（不静默跳过）。τ 与归一化逐数据集各自（各 meta 的 p85 分位 τ、ivd μ/σ、
+speed_max——跨数据集输入尺度一致化）。
+
+**注意**：多数据集联合训练与单数据集（p85 标签）重训是两条独立训练线——
+run_name/ckpt_dir 各不相同（`pathline_transformer_multi` vs
+`pathline_transformer_cylinder`），互不覆盖。
+
+## 8. 故障排查
 
 | 现象 | 处置 |
 |---|---|
@@ -118,7 +152,7 @@ Kaggle Notebook 通过 `git clone https://github.com/ziyixu317-wq/2d-vortex-extr
 | 磁盘不足（/kaggle/working 12GB） | `outputs/bench` 与 `outputs/train` 各占几 MB~数百 MB；memmap 走 symlink（不复制）；必要时删 `outputs/bench` |
 | 想要确定步速上限做预分配 | 参考 HANDOFF §5：T4 单卡 0.8~1.3s/步 → 40000 样本/100 batch = 400 步/epoch → 5.3~8.7 min/epoch |
 
-## 8. 相关约束（HANDOFF 摘录，实现已对齐）
+## 9. 相关约束（HANDOFF 摘录，实现已对齐）
 
 - 训练口径：AdamW(wd 1e-6)、lr 1e-4、TwoStep（warmup 60 → 5e-6）、batch 100、200 epoch、梯度裁剪 1.0、BCE（HANDOFF §2 论文附录 C / §6）；
 - 每 epoch checkpoint（含 optimizer 状态）是跨会话无损续训的硬性要求（HANDOFF §7 风险预案）；

@@ -6,12 +6,16 @@
   （与 extractor 越界 clamp 同语义）；
 - 固体区 IVD=0（依赖票 02 掩膜；geometry_meta/mask.npy 逐数据集预处理，
   本模块接受 (Y,X) 或 (T,Y,X) 掩膜，取第 0 帧）；
-- 标签 = 种子点处 IVD ≥ τ（默认 95 分位数、逐时间片）+ 5×5 最小面积
+- 标签 = 种子点处 IVD ≥ τ（默认 85 分位数、逐时间片）+ 5×5 最小面积
   （min_area=25 格）连通域过滤（复用 geometry.label_components，8 邻接）；
 - τ 的分位数在**流体区**统计（排除固体 0 值，避免其 41.8% 占比污染）；
 - 正样本 = patch 内存在 ≥1 条涡迹线（t0 帧标签场在 patch 内有正格）；
 - 2D Q-criterion Q = ‖Ω‖²/2 − ‖S‖²/2 = −(∂u/∂y)(∂v/∂x) − ½[(∂u/∂x)² + (∂v/∂y)²]，
-  仅作参考图目检对照（HANDOFF §6 风险预案：备选 Q-criterion 标签对照）。
+  仅作参考图目检对照（HANDOFF §6 风险预案：备选 Q-criterion 标签对照）；
+- 多阈值敏感性报告（multi_tau_report，票 07 延伸）：对既有 IVD 场重算
+  95/90/85/80 分位 + 固定阈值 × 面积过滤的标签覆盖率/连通块数/正样本占比
+  统计与目检图（含论文 Fig.6 列 1 风格的 IVD 白色等值线）——HANDOFF §7
+  风险预案「多阈值敏感性报告」的落地。
 
 实现约束：h5py 直读中文路径（数据读取在 geometry.load_field）；纯 numpy/python
 （遵守 §2 依赖清单，无 scipy；连通域过滤复用 geometry 的自写并查集）。
@@ -38,6 +42,10 @@ DEFAULT_SLICES = {"train": (0, 1001), "val": (1001, 1251), "test": (1251, 1501)}
 
 # 最小涡面积（HANDOFF §6）：5×5 连通域过滤
 DEFAULT_MIN_AREA = 5 * 5
+
+# τ 默认分位（HANDOFF §6；票 07 延伸：p95 弱标签相比论文 Fig.6 列 1 捕获稀疏
+# → 下探至 p85，覆盖率 4.8%→14.8% 且 5×5 过滤后结构块数 6.8→9.8/帧）
+DEFAULT_PERCENTILE = 85.0
 
 
 # --------------------------------------------------------------------------- 辅助
@@ -152,8 +160,8 @@ def q_criterion(u, v, xdim, ydim):
 
 # --------------------------------------------------------------------------- τ（逐时间片 95 分位）
 
-def compute_tau(ivd, mask, slices, percentile=95.0):
-    """τ = 流体区 IVD 的第 percentile 百分位（默认 95 分位），逐时间片（HANDOFF §6）。
+def compute_tau(ivd, mask, slices, percentile=DEFAULT_PERCENTILE):
+    """τ = 流体区 IVD 的第 percentile 百分位（默认 85 分位——票 07 延伸定案），逐时间片（HANDOFF §6）。
 
     slices: dict {name: (i0, i1)} 帧索引区间（默认 DEFAULT_SLICES 的时间划分）。
     分位数统计范围 = 非固体格（排除 IVD=0 的固体，其占比 41.8% 会污染阈值）。
@@ -296,6 +304,157 @@ def positive_patch_fraction(label_tyx, xdim, ydim, patch_size=(32, 32),
             "fraction": float(n_pos) / float(n_tot)}
 
 
+# --------------------------------------------------------------------------- 多阈值敏感性报告（HANDOFF §7 预案）
+
+# 候选 τ 默认集：逐时间片 95/90/85/80 分位 + 若干固定低阈值（绝对阈值仅对当前
+# 数据集有效——跨数据集 IVD 量纲不同，主口径仍为分位；票 07 延伸定案 p85）。
+DEFAULT_REPORT_PERCENTILES = (95.0, 90.0, 85.0, 80.0)
+DEFAULT_REPORT_FIXED = (2.5, 2.0, 1.5, 1.0)
+DEFAULT_REPORT_MIN_AREAS = (25, 9, 1)
+
+
+def compute_tau_candidates(ivd, mask, slices, percentiles=DEFAULT_REPORT_PERCENTILES,
+                           fixed_values=DEFAULT_REPORT_FIXED):
+    """多阈值候选 → {name: tau_cfg}；percentile 配置 → {片名: τ}，fixed → 标量。
+
+    与 multi_tau_report 共用（单一公式，防双份漂移）；name 格式
+    "p{percentile}"（分位）/"fixed{value}"（固定值）。
+    """
+    cfgs = {}
+    for p in percentiles:
+        cfgs[f"p{int(p)}"] = compute_tau(ivd, mask, slices,
+                                          percentile=float(p))
+    for v in fixed_values:
+        cfgs[f"fixed{v:g}"] = float(v)
+    return cfgs
+
+
+def _tau_for_frame(cfg, frame, slices):
+    """候选配置 + 帧 → 该帧 τ（分位配置按所属时间片取；固定配置恒等；未覆盖 None）。"""
+    if isinstance(cfg, dict):
+        for name, (i0, i1) in slices.items():
+            if i0 <= frame < i1:
+                return cfg[name]
+        return None
+    return float(cfg)
+
+
+def multi_tau_report(ivd, mask, slices, xdim, ydim, out_dir, *,
+                     percentiles=DEFAULT_REPORT_PERCENTILES,
+                     fixed_values=DEFAULT_REPORT_FIXED,
+                     min_areas=DEFAULT_REPORT_MIN_AREAS,
+                     display_frames=(400, 1200, 1300), sample_step=25,
+                     frame_step=4, title="", source_nc="", save_json=True):
+    """多阈值敏感性报告（HANDOFF §7 预案「多阈值敏感性报告」；票 07 延伸落地）。
+
+    对既有 IVD 场重算多阈值标签并输出：每候选 τ 的（正格占比[流体区]、
+    平均连通块数[采样帧]、正样本占比[种子判据, 逐时间片+全局]）+ 目检图：
+    - multi_tau_filled_t{t}.png：标签填充对比（行 = min_area，列 = 候选 τ）；
+    - multi_tau_isocontour_t{t}.png：IVD 底图 + 候选 τ 白色等值线
+      （论文 Fig.6 列 1 的呈现风格：IVD 参考是**连续场**，二值标签是**训练
+      目标**——两个不同语义，此处并列供用户肉眼对照）。
+    - multi_tau_stats.json：stats 落盘（save_json=True 时）。
+    返回 {"stats": {...}, "out_dir": str, "source_nc": str}。
+    """
+    import json
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    out_dir = pathlib.Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ivd = np.asarray(ivd, dtype=np.float64)
+    m2 = _mask2d(mask) if mask is not None else np.zeros(ivd.shape[1:], dtype=bool)
+    xdim = np.asarray(xdim, dtype=np.float64)
+    ydim = np.asarray(ydim, dtype=np.float64)
+    T = ivd.shape[0]
+    cfgs = compute_tau_candidates(ivd, m2, slices,
+                                  percentiles=percentiles,
+                                  fixed_values=fixed_values)
+
+    # ---- 统计
+    stats = {}
+    for name, cfg in cfgs.items():
+        tau_per_slice = cfg if isinstance(cfg, dict) else None
+        row = {"tau": None if tau_per_slice else float(cfg),
+               "taus_per_slice": tau_per_slice}
+        for ma in min_areas:
+            lab = build_label_field(ivd, m2, {k: cfg for k in slices} if tau_per_slice is None else cfg,
+                                    slices, min_area=ma)
+            row[f"pos_cell_frac_ma{ma}"] = float(lab[:, ~m2].mean())
+            frames = np.arange(0, T, sample_step)
+            n_comp = 0
+            for t in frames:
+                if lab[t].any():
+                    n_comp += geometry.label_components(
+                        lab[t].astype(bool), connectivity=8)[1]
+            row[f"mean_n_components_ma{ma}"] = float(n_comp) / max(len(frames), 1)
+            if ma == min_areas[0]:
+                per_slice = {}
+                for sname, (i0, i1) in slices.items():
+                    per_slice[sname] = positive_patch_fraction(
+                        lab, xdim, ydim, frame_indices=np.arange(i0, i1, frame_step))
+                row["pos_patch_fraction_per_slice"] = per_slice
+                row["pos_patch_fraction_all"] = positive_patch_fraction(
+                    lab, xdim, ydim, frame_indices=np.arange(0, T, frame_step))
+            del lab
+        stats[name] = row
+
+    # ---- 目检图（填充对比 + 论文风格白色等值线）
+    extent = [float(xdim[0]), float(xdim[-1]), float(ydim[0]), float(ydim[-1])]
+    frames = [min(int(t), T - 1) for t in display_frames if int(t) >= 0]
+    for t in frames:
+        ivd_t = np.asarray(ivd[t], dtype=np.float64)
+        # 1) 填充标签对比（行 = min_area，列 = 候选 τ）
+        fig, axes = plt.subplots(len(min_areas), len(cfgs),
+                                 figsize=(3.4 * len(cfgs), 3.4 * len(min_areas)))
+        axes = np.atleast_1d(axes) if len(cfgs) == 1 or len(min_areas) == 1 else axes
+        axes = np.asarray(axes).reshape(len(min_areas), len(cfgs))
+        for ri, ma in enumerate(min_areas):
+            for ci, (name, cfg) in enumerate(cfgs.items()):
+                ax = axes[ri, ci]
+                tau_t = _tau_for_frame(cfg, t, slices)
+                lab_t = _labeled_mask(ivd_t, tau_t, m2, ma)
+                ax.imshow(lab_t, origin="lower", aspect="auto", cmap="Greys",
+                          vmin=0, vmax=1, extent=extent)
+                ax.set_title(f"{name} tau={tau_t:.3g} ma={ma}\npos={lab_t.mean():.3f}",
+                             fontsize=8)
+                ax.set_xlabel("x"); ax.set_ylabel("y")
+        fig.suptitle(title or f"frame {t}: multi-tau weak labels "
+                             f"(rows: min_area, cols: tau candidates)")   # 英文：无 CJK 字体环境防豆腐块
+        fig.tight_layout()
+        fig.savefig(out_dir / f"multi_tau_filled_t{t}.png", dpi=110)
+        plt.close(fig)
+        # 2) 论文风格：IVD 底图 + 白色等值线（连续 IVD 参考）
+        fig, axes = plt.subplots(1, len(cfgs), figsize=(3.4 * len(cfgs), 3.8))
+        if len(cfgs) == 1:
+            axes = [axes]
+        vmax = float(np.percentile(ivd_t[~m2], 99.0))
+        for ax, (name, cfg) in zip(axes, cfgs.items()):
+            tau_t = _tau_for_frame(cfg, t, slices)
+            ax.imshow(ivd_t, origin="lower", aspect="auto", cmap="gray",
+                      vmin=0, vmax=max(vmax, 1e-12), extent=extent)
+            if tau_t is not None:
+                ax.contour(ivd_t, levels=[tau_t], colors="white", linewidths=1.0,
+                           extent=extent)
+            if m2.any():
+                ax.contour(m2, levels=[0.5], colors="red", linewidths=0.6,
+                           extent=extent)
+            ax.set_title(f"{name} tau={tau_t:.3g} (white iso)", fontsize=8)
+            ax.set_xlabel("x"); ax.set_ylabel("y")
+        fig.suptitle(title or f"frame {t}: IVD + white iso-contour at tau "
+                             f"(paper Fig.6 style, continuous reference)")
+        fig.tight_layout()
+        fig.savefig(out_dir / f"multi_tau_isocontour_t{t}.png", dpi=110)
+        plt.close(fig)
+
+    report = {"stats": stats, "out_dir": str(out_dir), "source_nc": str(source_nc)}
+    if save_json:
+        (out_dir / "multi_tau_stats.json").write_text(
+            json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    return report
+
+
 # --------------------------------------------------------------------------- 可视化（验收 1：目检）
 
 def plot_ivd_q(ivd2d, q2d, label2d, mask2d, xdim, ydim, out_png, tau,
@@ -390,13 +549,16 @@ def main(argv=None):
                     help="固体掩膜 mask.npy 路径；缺省从 nc 流式计算（逐帧取与）")
     ap.add_argument("--out-dir", default="outputs/weak_labels",
                     help="输出目录（ivd.npy / label_field.npy / weak_label_meta.json / 图）")
-    ap.add_argument("--percentile", type=float, default=95.0,
-                    help="τ 分位数（默认 95；HANDOFF §6）")
+    ap.add_argument("--percentile", type=float, default=DEFAULT_PERCENTILE,
+                    help="τ 分位数（默认 85——票 07 延伸；HANDOFF §6）")
     ap.add_argument("--min-area", type=int, default=DEFAULT_MIN_AREA,
                     help="连通域过滤最小面积（默认 5×5=25 格）")
     ap.add_argument("--frames", default="400,1200,1300",
                     help="目检图展示帧（逗号分隔；默认覆盖 train/val/test 三时间片）")
     ap.add_argument("--no-visualize", action="store_true", help="不生成目检图")
+    ap.add_argument("--multi-tau-dir", default=None,
+                    help="额外生成多阈值敏感性报告到该目录（HANDOFF §7 预案；"
+                         "p95/90/85/80 分位 + 固定阈值 × 面积过滤 统计与目检图）")
     args = ap.parse_args(argv)
 
     import h5py
@@ -496,6 +658,18 @@ def main(argv=None):
                                            f"tau sensitivity")
                 print(f"  目检图已保存: {out_dir / f'ivd_q_t{t0f}.png'} "
                       f"与 {out_dir / f'tau_sensitivity_t{t0f}.png'}")
+
+        # 6) 多阈值敏感性报告（HANDOFF §7 预案；票 07 延伸——τ 下探对齐论文 Fig.6）
+        if args.multi_tau_dir:
+            print(f"  多阈值敏感性报告 → {args.multi_tau_dir}")
+            rep = multi_tau_report(ivd, mask2d, slices, xdim, ydim,
+                                   args.multi_tau_dir, source_nc=str(args.nc_path))
+            for name, row in rep["stats"].items():
+                frac = row.get("pos_cell_frac_ma25")
+                comps = row.get("mean_n_components_ma25")
+                pa = row.get("pos_patch_fraction_all")
+                print(f"    {name}: pos_cell(ma25)={frac:.4f} "
+                      f"comps={comps:.2f} pos_patch={pa['fraction']:.4f}")
     return 0
 
 

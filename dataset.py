@@ -13,7 +13,10 @@
   data[1] = pathline_src (B, L, K, C)；dummy_field = zeros((1,1,1,1)) 参考口径）；
 - 标签 = 重播种后种子格处 label_field 值（label_field 含 5×5 面积过滤与固体强制 0）；
 - 每 epoch 40000 样本（下限 20000）、50% 正样本过采样（正样本 = patch 内存在
-  ≥1 条涡迹线；池判据与 weak_labels.patch_positive_map 单公式共用）。
+  ≥1 条涡迹线；池判据与 weak_labels.patch_positive_map 单公式共用）；
+- 多数据集（票 07 延伸，HANDOFF §1 决策 8 落实）：MultiDatasetPathlineDataset
+  合并多个 prepare_dataset 产物做采样（各数据集帧前 60% 训/后 40% 测的 frac
+  划分；τ 与归一化逐数据集各自——跨数据集输入尺度一致化）。
 
 性能说明（验收记录披露）：on-the-fly 提取 = extract_pathlines_batched（真实窗口
 实测 ~35ms，Kaggle 多进程 DataLoader 下 0.44s/batch(100) < T4 训练步时，不构成
@@ -70,6 +73,35 @@ def window_starts(i0, i1, t_win=DEFAULT_T_WIN, step=DEFAULT_WINDOW_STEP):
     if stop < i0:
         return np.empty(0, dtype=np.intp)
     return np.arange(i0, stop + 1, step, dtype=np.intp)
+
+
+def fraction_slices(T, train_frac=0.6, val_frac=0.0):
+    """按帧比例的时间片划分（票 07 延伸：多数据集按时间 60/40，无 val 时仅 train/test）。
+
+    DEFAULT_SLICES 为绝对秒数口径（仅适用 1501 帧/15s 的 pipedcylinder2d）；
+    多数据集帧数/时长各异（512~2001 帧、t∈[0,20]，jung telziemniak 的 t
+    从 1.107 起）→ 按帧比例划分才通用。返回 {name: (i0, i1)}：
+    train [0, i1)、val [i1, i2)（val_frac>0 时）、test [i2, T)；累积取整
+    （正数 floor = int()）→ 三片（或两片）全覆盖、无时间泄漏（与
+    DEFAULT_SLICES 同闭包语义）。train_frac ∈ (0,1)（严格）、
+    val_frac ∈ [0, 1−train_frac)（留出非空），违规 fail loud。
+    """
+    T, train_frac, val_frac = int(T), float(train_frac), float(val_frac)
+    if T < 2:
+        raise ValueError(f"T 过小无法划分: {T}")
+    if not 0 < train_frac < 1:
+        raise ValueError(f"train_frac 必须在 (0,1) 内，实际 {train_frac}")
+    if val_frac < 0 or train_frac + val_frac >= 1:
+        raise ValueError(f"val_frac 必须在 [0, 1−train_frac) 内，实际 {val_frac}")
+    i1 = int(T * train_frac)
+    i2 = int(T * (train_frac + val_frac))
+    if i1 <= 0 or i2 < i1:
+        raise ValueError(f"时间片划分过窄: train_end={i1} val_end={i2}")
+    out = {"train": (0, i1)}
+    if val_frac > 0:
+        out["val"] = (i1, i2)
+    out["test"] = (i2, T)
+    return out
 
 
 def patch_locations(H, W, patch_size=DEFAULT_PATCH_SIZE, stride=DEFAULT_STRIDE):
@@ -164,7 +196,8 @@ def _fit_slices(slices, T):
 def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
                     u=None, v=None, xdim=None, ydim=None, tdim=None,
                     mask=None, ivd=None, labels=None, min_area=weak_labels.DEFAULT_MIN_AREA,
-                    percentile=95.0, taus=None, slices=None,
+                    percentile=weak_labels.DEFAULT_PERCENTILE, taus=None, slices=None,
+                    split_mode="abs", train_frac=0.6, val_frac=0.0,
                     speed_max=None, ivd_stats_slice="train", ivd_mu=None, ivd_sigma=None,
                     patch_size=DEFAULT_PATCH_SIZE, stride=DEFAULT_STRIDE,
                     t_win=DEFAULT_T_WIN, window_step=DEFAULT_WINDOW_STEP):
@@ -258,6 +291,9 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
         ivd_source = "provided"
 
     # ---- 时间片与 τ
+    if split_mode == "frac":
+        # 票 07 延伸：按帧比例划分（60/40，可带 val）——多数据集通用口径
+        slices = fraction_slices(T, train_frac=train_frac, val_frac=val_frac)
     slices = _fit_slices(slices or weak_labels.DEFAULT_SLICES, T)
     ivd_mm = np.load(out_dir / FN_IVD, mmap_mode="r")
     if taus is None:
@@ -300,6 +336,9 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
         "tdim": [float(t) for t in tdim],
         "dt": float(tdim[1] - tdim[0]),
         "slices": {k: [int(a), int(b)] for k, (a, b) in slices.items()},
+        "split_mode": split_mode,
+        "train_frac": float(train_frac),
+        "val_frac": float(val_frac),
         "taus": taus,
         "percentile": float(percentile),
         "min_area": int(min_area),
@@ -324,37 +363,40 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
 
 # --------------------------------------------------------------------------- 数据集类
 
-def _comb_rng_base(seed, py, px, frame):
-    """组合级确定性随机基：同 (seed, patch, 帧) → 同 base（跨会话稳定）。
+def _comb_rng_base(seed, py, px, frame, ds_id=None):
+    """组合级确定性随机基：同 (ds_id, seed, patch, 帧) → 同 base（跨会话稳定）。
 
     供批量提取的 per-k 重播种派生（SeedSequence([base, k])）与池判定共用，
-    保证"池判定 / 标签判定 / 提取"三者一致（可复现）。
+    保证"池判定 / 标签判定 / 提取"三者一致（可复现）。ds_id 标识数据集
+    归属（多数据集池；None = 单数据集——字节兼容旧口径 f"{seed}:{py}:{px}:{frame}"，
+    避免升级后单数据集续训采样序漂移）。
     """
-    return zlib.crc32(f"{int(seed)}:{int(py)}:{int(px)}:{int(frame)}".encode("utf-8"))
+    if ds_id is None:
+        key = f"{int(seed)}:{int(py)}:{int(px)}:{int(frame)}"
+    else:
+        key = f"{int(seed)}:{int(ds_id)}:{int(py)}:{int(px)}:{int(frame)}"
+    return zlib.crc32(key.encode("utf-8"))
 
 
-class WeakLabelPathlineDataset:
-    """弱标签迹线数据集（on-the-fly；h5py+memmap）。
+class _DatasetStore:
+    """单数据集准备产物的存储与提取（一个 prepare_dataset 输出目录）。
 
-    构造：data_root 为 prepare_dataset 的输出目录（meta.json + memmap）。
-    set_epoch(epoch) 重建 50% 正样本过采样的采样序（每 epoch 调用一次；
-    首次使用前必须调用；同 (seed, epoch) → 同序）。__getitem__(idx) 返回
-    ((dummy_field, pathlines), labels)。
+    弱标签口径（HANDOFF §1 决策 8 / 票 05）：池判定 = patch_positive_map
+    （weak_labels 单一公式）；标签 = 重播种后种子格 label_field；归一化统计
+    取本数据集 meta.json（IVD z-score 的 μ/σ 与 speed_max 逐数据集各自——
+    票 07 延伸定案：跨数据集输入尺度一致化）；组合级确定性 rng 基 =
+    _comb_rng_base(seed, py, px, frame, ds_id)。
 
-    样本池：正 = patch 内存在 ≥1 条涡迹线（weak_labels.patch_positive_map 判据，
-    与票 04 正样本统计单公式共用）；负 = 其余。标签 = 重播种后种子格处
-    label_field 值（与输入迹线的实际出发位置自洽；正池零误差、负池掺正 ≤2%
-    为票 04 已披露近似，不影响过采样设计）。
+    采样/过采样（epoch 序、50% 正样本）不属于 store——由
+    WeakLabelPathlineDataset（单数据集）与 MultiDatasetPathlineDataset
+    （多数据集池）各自实现；sample_at 为公开入口（任意组合直接取，预览/滑窗用）。
     """
 
     def __init__(self, data_root, split="train", *,
                  patch_size=DEFAULT_PATCH_SIZE, stride=DEFAULT_STRIDE,
                  t_win=DEFAULT_T_WIN, window_step=DEFAULT_WINDOW_STEP,
-                 samples_per_epoch=DEFAULT_SAMPLES_PER_EPOCH,
-                 positive_fraction=DEFAULT_POSITIVE_FRACTION,
-                 t_scale=DEFAULT_T_SCALE, seed=0,
-                 groups=DEFAULT_GROUPS, delta_frac=DEFAULT_DELTA_FRAC,
-                 L=DEFAULT_L, n_substeps=4):
+                 seed=0, groups=DEFAULT_GROUPS, delta_frac=DEFAULT_DELTA_FRAC,
+                 L=DEFAULT_L, n_substeps=4, ds_id=None):
         root = pathlib.Path(data_root)
         self._root = root
         self._meta = load_dataset_meta(root)
@@ -367,19 +409,18 @@ class WeakLabelPathlineDataset:
         if split not in slices:
             raise ValueError(f"split {split!r} 不在时间片 {sorted(slices)} 内")
         self.split = split
-        self._i0, self._i1 = slices[split]
+        self.split_i0, self.split_i1 = slices[split]
+        self._i0, self._i1 = self.split_i0, self.split_i1
         self.patch_size = tuple(int(s) for s in patch_size)
         self.stride = tuple(int(s) for s in stride)
         self.t_win = int(t_win)
         self.window_step = int(window_step)
-        self.samples_per_epoch = int(samples_per_epoch)
-        self.positive_fraction = float(positive_fraction)
-        self.t_scale = float(t_scale)
         self.seed = int(seed)
         self.groups = tuple(int(g) for g in groups)
         self.delta_frac = float(delta_frac)
         self.L = int(L)
         self.n_substeps = int(n_substeps)
+        self.ds_id = ds_id
         self.speed_max = float(self._meta["speed_max"])
         self.ivd_mu = float(self._meta["ivd_mu"])
         self.ivd_sigma = float(self._meta["ivd_sigma"])
@@ -391,8 +432,6 @@ class WeakLabelPathlineDataset:
         self._label_mm = np.load(root / FN_LABEL, mmap_mode="r")
         self._mask2d = np.asarray(np.load(root / FN_MASK), dtype=bool)
         self._patches = patch_locations(self.Y, self.X, self.patch_size, self.stride)
-        self._order = None
-        self._epoch = None
         self.pool_positive, self.pool_negative = self._build_pools()
 
     # ---------------- 池构建（正样本判据：与 weak_labels 单公式共用）
@@ -474,7 +513,7 @@ class WeakLabelPathlineDataset:
         实测复现的时变冻结 bug，此处为单一修复点）。
         """
         geo = extractor.patch_geometry((py, px), self.patch_size, self._xdim, self._ydim)
-        base = _comb_rng_base(self.seed, py, px, frame)
+        base = _comb_rng_base(self.seed, py, px, frame, ds_id=self.ds_id)
         u_win = np.asarray(self._u_mm[frame:frame + self.t_win], dtype=np.float32)
         v_win = np.asarray(self._v_mm[frame:frame + self.t_win], dtype=np.float32)
         ivd_win = np.asarray(self._ivd_mm[frame:frame + self.t_win], dtype=np.float32)
@@ -495,32 +534,127 @@ class WeakLabelPathlineDataset:
         j = np.clip(j, 0, self.Y - 1)
         return self._label_mm[frame][j, i].astype(np.float32)
 
-    # ---------------- epoch 采样（50% 正样本过采样）
+    def sample_at(self, py, px, frame, t_scale=DEFAULT_T_SCALE):
+        """指定 (patch 位置 y0,x0, 窗口起点帧) 的完整样本——预览/诊断公开入口。
+
+        与 __getitem__ 同路径（_extract + normalize_pathlines + 标签判定），
+        返回 ((dummy_field, pathlines), labels, seeds)；不依赖 set_epoch/采样序
+        （任意 (patch, 帧) 组合可直接取——票 07 预览、票 08 滑窗评估的基础）。
+        """
+        raw, seeds, geo = self._extract(py, px, frame)
+        pathlines = normalize_pathlines(raw, seeds, geo, float(self._tdim[frame]),
+                                        self.t_span, t_scale, self.ivd_mu,
+                                        self.ivd_sigma, self.speed_max)
+        labels = self._labels_for(seeds, frame)
+        return (np.zeros((1, 1, 1, 1), dtype=np.float32), pathlines), labels, seeds
+
+
+# --------------------------------------------------------------------------- 单数据集包装（票 05 公开面）
+
+def _mixed_order(pool_positive, pool_negative, samples_per_epoch, positive_fraction,
+                 seed, epoch):
+    """50% 正池（放回）+ 50% 负池（放回）后打乱的采样序——单一公式（确定性 (seed, epoch)）。
+
+    单数据集（WeakLabelPathlineDataset，池编码 (y0,x0,frame)）与多数据集
+    （MultiDatasetPathlineDataset，编码 (si,y0,x0,frame)）共用：行数/行宽不同，
+    rng 语义一致（同 seed+epoch → 同序）。
+    """
+    rng = np.random.default_rng(np.random.SeedSequence([int(seed), int(epoch)]))
+    n_pos = int(round(int(samples_per_epoch) * float(positive_fraction)))
+    n_neg = int(samples_per_epoch) - n_pos
+    if not pool_positive:
+        raise ValueError(
+            "正样本池为空：无正 patch（检查 τ/标签场/时间片；多数据集时为联合池）")
+    if n_neg > 0 and not pool_negative:
+        raise ValueError("负样本池为空（样本池不完整）")
+    pick_p = np.asarray(pool_positive, dtype=np.int64)
+    pidx = pick_p[rng.integers(0, len(pool_positive), size=n_pos)]
+    if n_neg:
+        pick_n = np.asarray(pool_negative, dtype=np.int64)
+        nidx = pick_n[rng.integers(0, len(pool_negative), size=n_neg)]
+        order = np.concatenate([pidx, nidx])
+    else:
+        order = pidx
+    rng.shuffle(order)
+    return [tuple(int(x) for x in c) for c in order]
+
+
+class WeakLabelPathlineDataset:
+    """弱标签迹线数据集（on-the-fly；h5py+memmap）——单数据集包装（票 05 口径）。
+
+    构造：data_root 为 prepare_dataset 的输出目录（meta.json + memmap）。
+    set_epoch(epoch) 重建 50% 正样本过采样的采样序（每 epoch 调用一次；
+    首次使用前必须调用；同 (seed, epoch) → 同序，字节兼容票 05 实现）。
+    __getitem__(idx) 返回 ((dummy_field, pathlines), labels)。
+
+    样本池：正 = patch 内存在 ≥1 条涡迹线（weak_labels.patch_positive_map 判据，
+    与票 04 正样本统计单公式共用）；负 = 其余。标签 = 重播种后种子格处
+    label_field 值（与输入迹线的实际出发位置自洽；正池零误差、负池掺正 ≤2%
+    为票 04 已披露近似，不影响过采样设计）。存储/提取委托 _DatasetStore
+    （ds_id=None → 组合级 rng 基与旧实现逐字节一致；跨数据集预览传
+    dataset_idx 作 ds_id——与多数据集池同构）。
+    """
+
+    def __init__(self, data_root, split="train", *,
+                 patch_size=DEFAULT_PATCH_SIZE, stride=DEFAULT_STRIDE,
+                 t_win=DEFAULT_T_WIN, window_step=DEFAULT_WINDOW_STEP,
+                 samples_per_epoch=DEFAULT_SAMPLES_PER_EPOCH,
+                 positive_fraction=DEFAULT_POSITIVE_FRACTION,
+                 t_scale=DEFAULT_T_SCALE, seed=0,
+                 groups=DEFAULT_GROUPS, delta_frac=DEFAULT_DELTA_FRAC,
+                 L=DEFAULT_L, n_substeps=4, ds_id=None):
+        self._store = _DatasetStore(data_root, split, patch_size=patch_size,
+                                    stride=stride, t_win=t_win,
+                                    window_step=window_step, seed=seed,
+                                    groups=groups, delta_frac=delta_frac,
+                                    L=L, n_substeps=n_substeps, ds_id=ds_id)
+        # 公开别名（票 05 池名/测试/预览引用不变；委托存储）
+        self.pool_positive = self._store.pool_positive
+        self.pool_negative = self._store.pool_negative
+        self._patch_usable = self._store._patch_usable
+        self.seeds_for = self._store.seeds_for
+        self.T, self.Y, self.X = self._store.T, self._store.Y, self._store.X
+        self.patch_size = self._store.patch_size
+        self.stride = self._store.stride
+        self.split = split
+        self._root = self._store._root
+        self.t_win = self._store.t_win
+        self.window_step = self._store.window_step
+        self.groups = self._store.groups
+        self.delta_frac = self._store.delta_frac
+        self.L = self._store.L
+        self.n_substeps = self._store.n_substeps
+        self.samples_per_epoch = int(samples_per_epoch)
+        self.positive_fraction = float(positive_fraction)
+        self.t_scale = float(t_scale)
+        self.seed = int(seed)
+        self.speed_max = self._store.speed_max
+        self.ivd_mu = self._store.ivd_mu
+        self.ivd_sigma = self._store.ivd_sigma
+        self.t_span = self._store.t_span
+        self._xdim = self._store._xdim
+        self._ydim = self._store._ydim
+        self._tdim = self._store._tdim
+        self._label_mm = self._store._label_mm
+        self._ivd_mm = self._store._ivd_mm
+        self._u_mm = self._store._u_mm
+        self._v_mm = self._store._v_mm
+        self._mask2d = self._store._mask2d
+        self._order = None
+        self._epoch = None
+
+    # ---------------- epoch 采样（50% 正样本过采样；与票 05 同序口径）
 
     def set_epoch(self, epoch):
         """重建采样序：50% 正池（放回）+ 50% 负池（放回）后打乱。
 
-        每 epoch 调用一次；同 (seed, epoch) → 同序（确定性可复现）。
+        每 epoch 调用一次；同 (seed, epoch) → 同序（确定性可复现，_mixed_order
+        单一公式与多数据集共用）。
         """
         self._epoch = int(epoch)
-        rng = np.random.default_rng(np.random.SeedSequence([self.seed, self._epoch]))
-        n_pos = int(round(self.samples_per_epoch * self.positive_fraction))
-        n_neg = self.samples_per_epoch - n_pos
-        if not self.pool_positive:
-            raise ValueError(
-                "正样本池为空：数据集中无正 patch（检查 τ/标签场/时间片）")
-        if n_neg > 0 and not self.pool_negative:
-            raise ValueError("负样本池为空（样本池不完整）")
-        pick_p = np.asarray(self.pool_positive, dtype=np.int64)
-        pick_n = np.asarray(self.pool_negative, dtype=np.int64)
-        pidx = pick_p[rng.integers(0, len(self.pool_positive), size=n_pos)]
-        if n_neg:
-            nidx = pick_n[rng.integers(0, len(self.pool_negative), size=n_neg)]
-            order = np.concatenate([pidx, nidx])
-        else:
-            order = pidx
-        rng.shuffle(order)
-        self._order = [tuple(int(x) for x in c) for c in order]
+        self._order = _mixed_order(self.pool_positive, self.pool_negative,
+                                   self.samples_per_epoch, self.positive_fraction,
+                                   self.seed, self._epoch)
         return self._order
 
     def set_epoch_natural(self, epoch=0):
@@ -538,16 +672,15 @@ class WeakLabelPathlineDataset:
     def sample_at(self, py, px, frame):
         """指定 (patch 位置 y0,x0, 窗口起点帧) 的完整样本——预览/诊断公开入口。
 
-        与 __getitem__ 同路径（_extract + normalize_pathlines + 标签判定），
-        返回 ((dummy_field, pathlines), labels, seeds)；不依赖 set_epoch/采样序
-        （任意 (patch, 帧) 组合可直接取——票 07 预览、票 08 滑窗评估的基础）。
+        委托 store（与 __getitem__ 同路径）；返回 ((dummy_field, pathlines),
+        labels, seeds)。
         """
-        raw, seeds, geo = self._extract(py, px, frame)
-        pathlines = normalize_pathlines(raw, seeds, geo, float(self._tdim[frame]),
-                                        self.t_span, self.t_scale, self.ivd_mu,
-                                        self.ivd_sigma, self.speed_max)
-        labels = self._labels_for(seeds, frame)
-        return (np.zeros((1, 1, 1, 1), dtype=np.float32), pathlines), labels, seeds
+        return self._store.sample_at(py, px, frame, self.t_scale)
+
+    @property
+    def store(self):
+        """底层 _DatasetStore（预览/滑窗按数据集取样本的委托接缝）。"""
+        return self._store
 
     # ---------------- __getitem__
 
@@ -558,12 +691,87 @@ class WeakLabelPathlineDataset:
         if self._order is None:
             raise RuntimeError("先调用 set_epoch(epoch) 再采样（每 epoch 一次）")
         py, px, frame = self._order[idx]
-        raw, seeds, geo = self._extract(py, px, frame)
-        pathlines = normalize_pathlines(raw, seeds, geo, float(self._tdim[frame]),
-                                        self.t_span, self.t_scale, self.ivd_mu,
-                                        self.ivd_sigma, self.speed_max)
-        labels = self._labels_for(seeds, frame)
-        return (np.zeros((1, 1, 1, 1), dtype=np.float32), pathlines), labels
+        return self._store.sample_at(py, px, frame, self.t_scale)[:2]
+
+
+# --------------------------------------------------------------------------- 多数据集联合池（票 07 延伸）
+
+class MultiDatasetPathlineDataset:
+    """多数据集联合采样池（票 07 延伸：各数据集帧前 60% 一起训练/后 40% 留出评估）。
+
+    池 = 各数据集 store（_DatasetStore）的组合并集，组合编码 =
+    (store_idx, y0, x0, frame)；set_epoch(epoch) 重建 50% 正样本过采样序
+    （同 (seed, epoch) 确定性）；set_epoch_natural 按联合池自然比例；
+    sample_at(si, y0, x0, frame) 公开入口（预览/票 08 滑窗按数据集取样本）。
+    τ 与归一化逐数据集（各 store 自身 meta 统计：ivd z-score、u/v÷speed_max、
+    px/py 为 patch 内归一化——跨数据集输入尺度一致）；组合级 rng 基含
+    ds_id 派生（同语义、与单数据集不同构）。
+    """
+
+    def __init__(self, roots, split="train", *,
+                 patch_size=DEFAULT_PATCH_SIZE, stride=DEFAULT_STRIDE,
+                 t_win=DEFAULT_T_WIN, window_step=DEFAULT_WINDOW_STEP,
+                 samples_per_epoch=DEFAULT_SAMPLES_PER_EPOCH,
+                 positive_fraction=DEFAULT_POSITIVE_FRACTION,
+                 t_scale=DEFAULT_T_SCALE, seed=0,
+                 groups=DEFAULT_GROUPS, delta_frac=DEFAULT_DELTA_FRAC,
+                 L=DEFAULT_L, n_substeps=4):
+        roots = [pathlib.Path(r) for r in roots]
+        if not roots:
+            raise ValueError("roots 为空：至少一个数据集目录")
+        self._stores = [_DatasetStore(
+            r, split, patch_size=patch_size, stride=stride, t_win=t_win,
+            window_step=window_step, seed=seed, groups=groups,
+            delta_frac=delta_frac, L=L, n_substeps=n_substeps, ds_id=i)
+            for i, r in enumerate(roots)]
+        self.pool_positive = [(i, *combo) for i, s in enumerate(self._stores)
+                              for combo in s.pool_positive]
+        self.pool_negative = [(i, *combo) for i, s in enumerate(self._stores)
+                              for combo in s.pool_negative]
+        self.samples_per_epoch = int(samples_per_epoch)
+        self.positive_fraction = float(positive_fraction)
+        self.t_scale = float(t_scale)
+        self.seed = int(seed)
+        self._order = None
+        self._epoch = None
+
+    @property
+    def stores(self):
+        """各数据集 store（预览/滑窗按数据集取样本与 patch 位置）。"""
+        return self._stores
+
+    def set_epoch(self, epoch):
+        """重建采样序：联合池 50% 正样本过采样（同 (seed, epoch) → 同序）。"""
+        self._epoch = int(epoch)
+        self._order = _mixed_order(self.pool_positive, self.pool_negative,
+                                   self.samples_per_epoch, self.positive_fraction,
+                                   self.seed, self._epoch)
+        return self._order
+
+    def set_epoch_natural(self, epoch=0):
+        """按联合池自然比例（正/负池大小比）重建采样序（留出评估口径）。"""
+        n_pos = len(self.pool_positive)
+        n_neg = len(self.pool_negative)
+        total = n_pos + n_neg
+        self.positive_fraction = n_pos / total if total > 0 else 0.5
+        return self.set_epoch(int(epoch))
+
+    def sample_at(self, si, y0, x0, frame):
+        """指定 (数据集索引, patch 位置, 窗口起点帧) 的完整样本——公开入口。
+
+        返回 ((dummy_field, pathlines), labels, seeds)；归一化取该数据集
+        store 自己的统计。
+        """
+        return self._stores[int(si)].sample_at(y0, x0, frame, self.t_scale)
+
+    def __len__(self):
+        return self.samples_per_epoch
+
+    def __getitem__(self, idx):
+        if self._order is None:
+            raise RuntimeError("先调用 set_epoch(epoch) 再采样（每 epoch 一次）")
+        si, py, px, frame = self._order[idx]
+        return self._stores[si].sample_at(py, px, frame, self.t_scale)[:2]
 
 
 # --------------------------------------------------------------------------- CLI（prepare_dataset 入口）
@@ -582,12 +790,22 @@ def main(argv=None):
                     help="固体掩膜 mask.npy 路径（缺省从速度场计算或空掩膜）")
     ap.add_argument("--ivd", default=None, help="复用票 04 产物 ivd.npy 路径")
     ap.add_argument("--labels", default=None, help="复用票 04 产物 label_field.npy 路径")
-    ap.add_argument("--percentile", type=float, default=95.0, help="τ 分位数（默认 95）")
+    ap.add_argument("--percentile", type=float, default=weak_labels.DEFAULT_PERCENTILE,
+                    help="τ 分位数（默认 85——票 07 延伸；HANDOFF §6）")
+    ap.add_argument("--split-mode", choices=("abs", "frac"), default="abs",
+                    help="时间片划分口径：abs=绝对秒数 DEFAULT_SLICES（单数据集默认）；"
+                         "frac=按帧比例（多数据集 60/40，票 07 延伸）")
+    ap.add_argument("--train-frac", type=float, default=0.6,
+                    help="frac 口径的训练帧比例（默认 0.6）")
+    ap.add_argument("--val-frac", type=float, default=0.0,
+                    help="frac 口径的 val 帧比例（默认 0=无 val 片）")
     args = ap.parse_args(argv)
 
     meta = prepare_dataset(args.nc_path, args.out_dir, mask=args.mask,
                            ivd=args.ivd, labels=args.labels,
-                           percentile=args.percentile)
+                           percentile=args.percentile,
+                           split_mode=args.split_mode,
+                           train_frac=args.train_frac, val_frac=args.val_frac)
     print(f"数据集已准备: {args.out_dir}")
     print(f"  shape={meta['shape']} slices={meta['slices']}")
     print(f"  taus={meta['taus']}")

@@ -100,6 +100,74 @@ class TestTimeSlices:
         assert not (spans["train"] & spans["test"])
 
 
+class TestFractionSlices:
+    """按时间 60/40 划分（票 07 延伸：多数据集各数据集帧前 60% 训 / 后 40% 测）。
+
+    与 DEFAULT_SLICES（绝对秒数）不同：多数据集帧数/时长各异（512~2001 帧、
+    t∈[0,20] 且 jung telziemniak t 从 1.107 起）——绝对秒数不通用，按帧比例划分。
+    """
+
+    def test_frac_slices_60_40_contiguous_cover(self):
+        """1501 帧：train [0,900)、test [900,1501)（floor(1501×0.6)=900）；全覆盖无泄漏。"""
+        from dataset import fraction_slices
+        s = fraction_slices(1501, train_frac=0.6)
+        assert s == {"train": (0, 900), "test": (900, 1501)}
+        covered = np.zeros(1501, dtype=bool)
+        for i0, i1 in s.values():
+            covered[i0:i1] = True
+        assert covered.all()
+
+    def test_frac_slices_windows_disjoint(self):
+        """窗口（T_win=24）帧集合三片互斥且各自完全在片内（无时间泄漏）。"""
+        from dataset import fraction_slices, window_starts
+        s = fraction_slices(1501, train_frac=0.5, val_frac=0.1)
+        spans = {}
+        for name, (i0, i1) in s.items():
+            starts = window_starts(i0, i1, t_win=24, step=4)
+            frames = set()
+            for st in starts:
+                frames |= set(int(f) for f in np.arange(st, st + 24))
+            spans[name] = frames
+        assert not (spans["train"] & spans["val"])
+        assert not (spans["val"] & spans["test"])
+        assert not (spans["train"] & spans["test"])
+
+    def test_frac_slices_with_val_literals(self):
+        """带 val（50/10/40）：i1=floor(1501×0.5)=750、i2=floor(1501×0.6)=900。"""
+        from dataset import fraction_slices
+        s = fraction_slices(1501, train_frac=0.5, val_frac=0.1)
+        assert s == {"train": (0, 750), "val": (750, 900), "test": (900, 1501)}
+
+    def test_frac_slices_small_T_and_nyquist(self):
+        """小数据集：512 帧 → train (0,307)、test (307,512)（floor 512×0.6=307.2→307）。"""
+        from dataset import fraction_slices
+        assert fraction_slices(512, train_frac=0.6) == {
+            "train": (0, 307), "test": (307, 512)}
+
+    def test_prepare_dataset_frac_mode(self, tmp_path):
+        """prepare_dataset split_mode=frac：T=48 → train (0,28)、test (28,48)
+        （floor(48×0.6)=28.8→28；τ 与标签沿用 train/test 逐片口径）。"""
+        import dataset as ds
+        u, v, xdim, ydim, tdim = synth_prepared(tmp_path / "p", T=48)
+        meta = ds.prepare_dataset(None, str(tmp_path / "d"), u=u, v=v, xdim=xdim,
+                                  ydim=ydim, tdim=tdim, split_mode="frac")
+        assert meta["slices"] == {"train": [0, 28], "test": [28, 48]}
+        assert meta["split_mode"] == "frac"
+        assert set(meta["taus"]) == {"train", "test"}
+
+    def test_frac_slices_invalid_params(self):
+        """非法参数 fail loud：train_frac 越界、val_frac 越界、留出为空。"""
+        from dataset import fraction_slices
+        with pytest.raises(ValueError):
+            fraction_slices(100, train_frac=0.0)
+        with pytest.raises(ValueError):
+            fraction_slices(100, train_frac=1.2)
+        with pytest.raises(ValueError):
+            fraction_slices(100, train_frac=0.6, val_frac=0.6)   # 留出为空
+        with pytest.raises(ValueError):
+            fraction_slices(100, train_frac=0.6, val_frac=-0.1)
+
+
 class TestPatchLocations:
     """patch 位置网格：完全落在帧内、按 (y 外, x 内) 序。"""
 

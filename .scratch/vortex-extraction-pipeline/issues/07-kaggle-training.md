@@ -35,3 +35,27 @@
 
 **用户执行（收尾后）**：① 本机普通终端 `git push -c http.sslBackend=openssl origin main`（沙箱 git 无法 GCM）；② `python kaggle\prepare_dataset_a.py --nc ..\CFD数据集\pipedcylinder2d.nc --dataset-dir outputs\dataset --aux-dirs outputs\weak_labels --out kaggle_dataset_a --zip`；③ Kaggle 按 `kaggle/README.md` §2–6 建 Dataset/Notebook → Run All（约 3–4 个 12h 会话）→ 下载 final_ckpt.zip → 回填本验收项勾选、val F1、步速与 HANDOFF §6/§11。
 
+## 完成记录-延伸段（2026-08-25，票 07 延伸：多数据集联合训练 + τ 对齐论文 Fig.6）
+
+**范围**（用户两个问题）：① 需求 A——弱标签 IVD 阈值对齐论文 Fig.6 列 1（IVD 在该数据集的白色等值线呈现）；② 需求 B——按论文 §4.2 评估范式（多数据集训练 → 真实数据测试，未接触测试数据）做多数据集联合训练 + 跨数据集留出评估。**口径说明（诚实性）**：本实现为**时间留出近似**（各数据集自身前 60% 参与训练、后 40% 时间上未见、覆盖 7 类不同流场）；**非**论文严格零样本（严格零样本须按数据集留出，用户拍板按时间 60/40 未采用）。**拍板（用户确认）**：τ=p85 逐时间片分位、5×5 面积过滤保留、按时间各数据集帧前 60% 训/后 40% 测（无 val）、τ/归一化逐数据集各自、训练池=全部 7 数据集（6 新 + pipedcylinder2d）。
+
+**需求 A（τ 对齐）——已交付**：
+- 多阈值敏感性报告：`weak_labels.compute_tau_candidates`/`multi_tau_report` + CLI `--multi-tau-dir`（候选 95/90/85/80 分位 × 固定 2.5/2.0/1.5/1.0 × min_area 25/9/1；统计：正格占比/连通块数/正样本占比；目检图含论文风格 IVD 白色等值线——**连续 IVD 参考 vs 二值训练目标两语义分开标注**）；产物 `outputs/weak_labels/multi_tau/`（stats json + 图，gitignore）。
+- **实测结论（pipedcylinder2d，流体区）**：p95=4.81% 正格（稀疏，用户观察成立）→ p90=9.90%（τ≈1.08-1.18、涡块 6.8→7.0/帧——覆盖率翻倍但结构块数不变：主要"填补"涡街/拐角回流，最接近论文呈现）→ p85=14.80%（τ≈0.61-0.65、块 9.8）→ p80=19.73%（块 12.2、碎片 38.8/帧不过滤）；固定 τ 跨数据集不可移植（IVD 量纲 300× 差）；**5×5 过滤在 p85 只删 0.15% 正格但消 ~15 碎片块/帧 → 保留**。用户拍板 p85。
+- 实现：τ 默认 95→85（`weak_labels.DEFAULT_PERCENTILE`，compute_tau/prepare_dataset/双 CLI 同步；HANDOFF §6 回写）；单数据集产物 `outputs/dataset` 本地重生成 p85 标签（taus=0.6539/0.6512/0.6113）；**影响标注**：已训练 25-epoch 模型为旧 τ（p95）标签 → 新 τ 标签需重训（用户 Kaggle 执行）；preview 标题语义标注生效。
+
+**需求 B（多数据集）——已交付**：
+- `dataset.fraction_slices`（按帧比例 60/40/可选 val；floor 取整、全覆盖无泄漏，守护测试 6 项）；`prepare_dataset` 增 `split_mode=abs|frac` + CLI；
+- dataset.py 重构：`_DatasetStore`（单数据集存储/提取/池）→ `WeakLabelPathlineDataset` 薄包装（公开面与票 05 逐字节兼容：**单数据集续训采样序不变**，既有测试全绿守护）+ **`MultiDatasetPathlineDataset`**（7 roots 联合池 (ds_idx,y0,x0,frame)；50% 过采样/set_epoch_natural/sample_at(si,…)/stores 公开；组合级 rng 基含 ds_id 派生——同语义、多数据集与单数据集不同构）；归一化逐数据集（各 store meta）；
+- `train_kaggle.py`：`_make_dataset` 支持 `data.root` 列表；`evaluate_f1` 增 **IoU**；`--f1-split`（默认 val_split；指定片不存在 fail loud；多数据集 `--report-f1 --f1-split test` 对留出 40% 出自然分布 F1/IoU → `{run}_test_f1.json`）；
+- `kaggle/preview_eval.py`：`--dataset` 索引跨数据集推理（单 ckpt → 各数据集 test 片，时间留出泛化观察简版——非严格零样本，见本段口径说明）；`kaggle/prepare_dataset_a.py`：`--nc/--dataset-dir` 多对打包（data/<nc>+datasets/<名>/ 布局 + manifest，单数据集布局不变）；
+- `prepare_multi.py`（7 数据集逐数据集预处理驱动：geometry→IVD/label/τ→memmap+meta+目检图，复用票 02/05）；`config/pathline_transformer_multi.yaml`（7 roots、frac、val_split none、run_name 独立）；`kaggle/README.md` §7 多数据集执行说明。
+
+**验证证据**：全量 **186 passed**（159 基线 + 27 新增，含：多阈值报告 3、fraction_slices 6、多数据集池 6、train 集成 4、IoU 1、preview 2、打包 2、prepare_multi 3）；真实数据 = 7 数据集预处理产物（`outputs/datasets/`，§2 盘点表——boussinesq 1 障碍物 242 格、cylinder2d 1 圆柱 60 格、doublegyre/duffing/fourcenters/jung 无障碍（jung 12 格、doublegyre 4 格单格噪声点）、pipedcylinder2d 2 圆柱；IVD 量纲 300× 差 → 逐数据集分位 τ 必要；jung t 从 1.107 起 → 帧比例划分必要）+ 多数据集池实测（train 正 78,351/负 82,757、构建 2.0s；跨数据集样本逐数据集归一化/有限性/确定性序 ✓）+ test 片自然分布 F1/IoU 跑通（随机小模型 n=16384, F1=0.281, IoU=0.163）+ 跨数据集预览（25-epoch 基线 → 未见过的 duffing 帧 350 → `outputs/preview/multi_duffing_t350.png`）。
+
+**/code-review 双轴处置**：见会话记录（Standards/Spec 各发现均已处置；本段不重复）。
+
+**用户执行（延伸部分）**：① git push（本延伸 commit）；② 本地重新打包 Dataset A（单数据集 p85：`--dataset-dir outputs\dataset`；多数据集：§7 命令）；③ Kaggle 两条训练线任选或都跑：单数据集重训（p85 标签，`--config config/pathline_transformer_cylinder.yaml`）与多数据集联合训练（`--config config/pathline_transformer_multi.yaml --report-f1 --f1-split test`，notebook 按 README §7 适配挂载）；④ 回填 HANDOFF §6 实测值与 §11。
+
+**执行边界**：新 τ 标签重训与多数据集 200 epoch 训练/留出评估级记录 = 用户 Kaggle 执行（本会话交付代码/产物/文档与本地 CPU 验证）；正式弱定量表（网格投影级、多帧/动画）属票 08。
+

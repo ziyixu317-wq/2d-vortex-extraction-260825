@@ -106,14 +106,15 @@ def build_criterion_from_config(config):
 
 
 def _make_dataset(data_cfg, split):
-    """YAML data 段 → WeakLabelPathlineDataset（train/val 唯一构造点，防参数漂移）。
+    """YAML data 段 → WeakLabelPathlineDataset/MultiDatasetPathlineDataset。
 
-    patch/窗口/十字采样/时间采样参数全部从 YAML 传入（HANDOFF §6 参数表；
-    与 prepare_dataset 口径一致）。val 与训练共用 positive_fraction（监控口径：
-    val 损失按训练同款 50% 平衡采样计算；自然分布精度评估属票 08 弱定量表）。
+    data.root 为单个目录 → 单数据集（票 05 口径）；为目录列表 → 多数据集联合池
+    （票 07 延伸：各数据集前 60% 一起训练/后 40% 留出评估）。patch/窗口/十字
+    采样/时间采样参数全部从 YAML 传入（HANDOFF §6 参数表；与 prepare_dataset
+    口径一致）。值监控口径：val 损失按训练同款 50% 平衡采样计算；自然分布
+    精度评估属 --report-f1/票 08 弱定量表。
     """
-    return ds.WeakLabelPathlineDataset(
-        data_cfg["root"], split=split,
+    common = dict(
         patch_size=tuple(int(v) for v in data_cfg.get("patch_size", ds.DEFAULT_PATCH_SIZE)),
         stride=tuple(int(v) for v in data_cfg.get("stride", ds.DEFAULT_STRIDE)),
         t_win=int(data_cfg.get("t_win", ds.DEFAULT_T_WIN)),
@@ -126,6 +127,10 @@ def _make_dataset(data_cfg, split):
         delta_frac=float(data_cfg.get("delta_frac", ds.DEFAULT_DELTA_FRAC)),
         L=int(data_cfg.get("L", ds.DEFAULT_L)),
         n_substeps=int(data_cfg.get("n_substeps", 4)))
+    root = data_cfg.get("root", "outputs/dataset")
+    if isinstance(root, (list, tuple)):
+        return ds.MultiDatasetPathlineDataset(list(root), split=split, **common)
+    return ds.WeakLabelPathlineDataset(root, split=split, **common)
 
 
 # --------------------------------------------------------------------------- 训练/评估循环
@@ -201,13 +206,13 @@ def evaluate(model, loader, criterion, device, max_steps=None):
 
 @torch.no_grad()
 def evaluate_f1(model, loader, device, threshold=0.5, max_steps=None):
-    """自然分布 val 片上的 F1 评估（训练收尾的 val F1 记录，票 07 验收 4）。
+    """自然分布 val/test 片上的 F1/IoU 评估（训练收尾记录，票 07 验收 4 + 票 07 延伸）。
 
     口径：模型输出 sigmoid 概率 > threshold 判正（默认 0.5）；与弱标签逐迹线
-    0/1 求混淆矩阵 → precision/recall/F1。自然分布指采样序的正负比例 = 池比例
-    （非训练同款 50% 平衡；平衡采样是训练监控口径，自然分布为真实精度观察口径，
-    正式弱定量表属票 08）。
-    返回 dict：tp/fp/fn/tn/precision/recall/f1/n（n = 评估迹线总数）。
+    0/1 求混淆矩阵 → precision/recall/F1/IoU（IoU = tp/(tp+fp+fn)，票 07 延伸
+    留出评估指标）。自然分布指采样序的正负比例 = 池比例（非训练同款 50% 平衡；
+    平衡采样是训练监控口径，自然分布为真实精度观察口径，正式弱定量表属票 08）。
+    返回 dict：tp/fp/fn/tn/precision/recall/f1/iou/n（n = 评估迹线总数）。
     """
     model.eval()
     tp = fp = fn = tn = n = 0
@@ -225,9 +230,10 @@ def evaluate_f1(model, loader, device, threshold=0.5, max_steps=None):
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    iou = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else 0.0
     return {"tp": tp, "fp": fp, "fn": fn, "tn": tn,
             "precision": float(precision), "recall": float(recall),
-            "f1": float(f1), "n": n}
+            "f1": float(f1), "iou": float(iou), "n": n}
 
 
 # --------------------------------------------------------------------------- checkpoint（断点续训）
@@ -316,7 +322,10 @@ def main(argv=None):
     ap.add_argument("--max-steps", type=int, default=None,
                     help="每 epoch 最多训练步数（CPU 冒烟 1~2 步用）")
     ap.add_argument("--report-f1", action="store_true",
-                    help="训练完成后在 val 片记录自然分布 F1（val_f1.json，票 07 验收 4）")
+                    help="训练完成后记录自然分布 F1/IoU（val_f1.json，票 07 验收 4）")
+    ap.add_argument("--f1-split", default=None,
+                    help="F1/IoU 记录的时间片名（默认 val_split；多数据集 60/40 "
+                         "无 val 时传 test——对留出 40% 跨数据集 test 片推理，票 07 延伸）")
     args = ap.parse_args(argv)
 
     config = load_config(args.config)
@@ -336,21 +345,25 @@ def main(argv=None):
                           second_lr=float(train_cfg["second_lr"]),
                           warmup_epochs=int(train_cfg["warmup_epochs"]))
 
-    # ---- 数据集（WeakLabelPathlineDataset：set_epoch 每 epoch 重建过采样序）
+    # ---- 数据集（WeakLabelPathlineDataset/MultiDatasetPathlineDataset；set_epoch 每 epoch 重建过采样序）
     data_cfg = config["data"]
     train_ds = _make_dataset(data_cfg, data_cfg.get("split", "train"))
     train_loader = _make_loader(train_ds, data_cfg["batch_size"],
                                 data_cfg.get("num_workers", 0), device)
     val_loader = None
     val_split = data_cfg.get("val_split", "val")
-    meta_slices = ds.load_dataset_meta(data_cfg["root"])["slices"]
-    if val_split in meta_slices:
+    raw_roots = data_cfg["root"] if isinstance(data_cfg["root"], (list, tuple)) \
+        else [data_cfg["root"]]
+    root_slice_sets = [set(ds.load_dataset_meta(r)["slices"]) for r in raw_roots]
+    common_slices = set.intersection(*root_slice_sets) if root_slice_sets else set()
+    if val_split in common_slices:
         val_ds = _make_dataset(data_cfg, val_split)
         val_ds.set_epoch(0)      # 固定确定性 val 采样序（跨 epoch 可比；训练序每 epoch 重建）
         val_loader = _make_loader(val_ds, data_cfg["batch_size"],
                                   data_cfg.get("num_workers", 0), device)
     else:
-        print(f"[train] 警告: 数据集无 {val_split!r} 时间片（小数据集/合成场）→ 跳过验证")
+        print(f"[train] 警告: 数据集无 {val_split!r} 时间片（小数据集/合成场/多数据集 60/40）"
+              f"→ 跳过验证；留出评估用 --report-f1 --f1-split test")
 
     # ---- 续训（auto/none/路径）
     ckpt_dir = pathlib.Path(train_cfg.get("ckpt_dir", "outputs/train"))
@@ -405,23 +418,37 @@ def main(argv=None):
             save_ckpt(ckpt_dir / f"{run_name}_E{epoch + 1}.pth", model, optimizer,
                       scheduler, epoch=epoch, metrics=metrics, config=config)
 
-    # ---- 训练完成 → val 自然分布 F1 记录（票 07 验收 4；--report-f1 显式开关）
-    if args.report_f1 and val_loader is not None:
-        val_ds.set_epoch_natural(0)      # 自然分布序（正负比例 = val 池比例；
+    # ---- 训练完成 → 自然分布 F1/IoU 记录（票 07 验收 4 + 票 07 延伸留出评估；
+    #      --report-f1 显式开关；--f1-split 指定片，默认 val_split，
+    #      多数据集 60/40 无 val 时传 test——对留出 40% 跨数据集 test 片推理）
+    if args.report_f1:
+        f1_split = args.f1_split if args.f1_split else val_split
+        if f1_split not in common_slices:
+            if args.f1_split:
+                raise ValueError(
+                    f"--f1-split {f1_split!r} 不在各数据集共有的时间片 "
+                    f"{sorted(common_slices)} 内")
+            print(f"[train] 无 {f1_split!r} 时间片 → 跳过 F1 记录"
+                  f"（如需留出评估传 --f1-split test）")
+        else:
+            f1_ds = _make_dataset(data_cfg, f1_split)
+            f1_ds.set_epoch_natural(0)   # 自然分布序（正负比例 = 池比例；
                                          # 池空时 set_epoch fail loud——数据异常不静默）
-        f1_loader = _make_loader(val_ds, data_cfg["batch_size"],
-                                 data_cfg.get("num_workers", 0), device)
-        f1_metrics = evaluate_f1(model, f1_loader, device)
-        f1_blob = {"epoch": int(train_cfg["epochs"]) - 1, "split": val_split,
-                   "threshold": 0.5, **f1_metrics}
-        f1_path = ckpt_dir / f"{run_name}_val_f1.json"
-        f1_path.write_text(json.dumps(f1_blob, indent=2, ensure_ascii=False),
-                           encoding="utf-8")
-        print(f"[train] val F1（自然分布，{val_split}）："
-              f"F1={f1_metrics['f1']:.4f} P={f1_metrics['precision']:.4f} "
-              f"R={f1_metrics['recall']:.4f} "
-              f"(tp={f1_metrics['tp']} fp={f1_metrics['fp']} "
-              f"fn={f1_metrics['fn']} n={f1_metrics['n']}) → {f1_path}")
+            f1_loader = _make_loader(f1_ds, data_cfg["batch_size"],
+                                     data_cfg.get("num_workers", 0), device)
+            f1_metrics = evaluate_f1(model, f1_loader, device)
+            f1_blob = {"epoch": int(train_cfg["epochs"]) - 1, "split": f1_split,
+                       "threshold": 0.5, **f1_metrics}
+            f1_name = (f"{run_name}_val_f1.json" if f1_split == val_split
+                       else f"{run_name}_{f1_split}_f1.json")
+            f1_path = ckpt_dir / f1_name
+            f1_path.write_text(json.dumps(f1_blob, indent=2, ensure_ascii=False),
+                               encoding="utf-8")
+            print(f"[train] F1/IoU（自然分布，{f1_split}）："
+                  f"F1={f1_metrics['f1']:.4f} IoU={f1_metrics['iou']:.4f} "
+                  f"P={f1_metrics['precision']:.4f} R={f1_metrics['recall']:.4f} "
+                  f"(tp={f1_metrics['tp']} fp={f1_metrics['fp']} "
+                  f"fn={f1_metrics['fn']} n={f1_metrics['n']}) → {f1_path}")
     return 0
 
 

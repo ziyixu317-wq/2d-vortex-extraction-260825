@@ -24,7 +24,7 @@
 5. **不做 ivd 遮除消融**：IVD 是公认高精度涡判据，模型学习其近似是可接受且预期的。
 6. **迹线口径 = 256 条**：64 组 × 4 卫星点（不含中心），`KpathlinePerGroup=4`，对齐论文与发布数据。
 7. **代码组织**：独立自包含工程，迁移（复制）所需代码进本项目，不依赖原始 `PyflowVis-main`；保留 Apache 2.0 署名。
-8. **geometry 掩膜是逐数据集预处理**，不进入模型输入，不影响多数据集泛化（后续会加更多仿真数据集）。
+8. **geometry 掩膜是逐数据集预处理**，不进入模型输入，不影响多数据集泛化（后续会加更多仿真数据集）。（2026-08-25 票 07 延伸落实：7 数据集联合训练——`prepare_multi.py` 逐数据集预处理 → `MultiDatasetPathlineDataset` 联合采样池，frac 60/40 逐数据集时间划分，配置 `config/pathline_transformer_multi.yaml`。）
 
 ## 2. 已核实事实（带来源，直接用，勿重新考证）
 
@@ -39,6 +39,23 @@
 | 固体几何（票 02 实测） | 全帧取与（\|v\|<1e-5）后 **4 个连通块**：两块矩形壁面（x∈[2.5,5.5],y∈[-0.5,0.5] 与 x∈[-0.5,1.5],y∈[0.5,1.5]，接触域边界）+ **两个孤立圆柱**：入口 (≈0,0) 与拐角后管道 (≈3,1)，零速盘 43/45 格（圆角方块，等效半径≈0.047）；radius=0.0625 与 Re=160=U·D/ν（U=1, D=2r, ν=0.00078125）自洽；零速区为圆柱**内切区**（表面约 1 格厚格被插值为非零速），物理半径≈面积等效+1 格≈0.063 |
 | 坑 | netCDF4 的 C 库打不开中文路径（实测）；**h5py 可直接读中文路径** → 一律用 h5py。Kaggle 路径为 ASCII 无此问题 |
 | 可用 patch（票 05 实测） | 216 个 patch 位置中 **128 个可用**（88 个不可用：种子-中心线段全固体——壁面区/圆柱包围区；票 03 "全固体 patch 应避开"边界）；池组合 31,360（train 片：正 13,652=43.5%、负 17,708） |
+
+### 多数据集盘点（票 07 延伸实测 2026-08-25，`CFD数据集/` 下 6 个新数据集 + 既有 pipedcylinder2d）
+
+| 数据集 | (T,Y,X) | 域 / t 范围 | speed_max | 固体（全帧取与 \|v\|<1e-5） | τ（p85，train/test frac 片） | 标签正格（流体区） |
+|---|---|---|---|---|---|---|
+| boussinesq | 2001×450×150 | x[-0.5,0.5] y[-0.5,2.5] / [0,20] | 1.254 | 242 格 1 块（≤1 圆柱，有 obstacle_pos/radius 元数据） | 0.0555 / 0.5955 | 14.3% |
+| cylinder2d | 1501×80×640 | x[-0.5,7.5] y[-0.5,0.5] / [0,15] | 1.836 | 60 格 1 块（1 圆柱，Re/nu/radius 元数据） | 0.0545 / 0.1022 | 14.3% |
+| doublegyre2d | 512×128×256 | x[0,2] y[0,1] / [0,10] | 0.471 | 4 单格噪声点（无实质障碍） | 0.0022 / 0.0024 | 15.0% |
+| forceddampedduffing2d | 512×128×128 | [-2,2]² / [0,4] | 7.184 | 无 | 0.0060 / 0.0060 | 8.3% |
+| fourcenters2d | 512×128×128 | [-2,2]² / [0,6.28] | 2.848 | 无 | 0.0240 / 0.0240 | 15.0% |
+| jungtelziemniak2d | 500×200×450 | x[-3,7] y[-2,2] / [1.107,5.535] | 65.71 | 12 单格噪声点（无实质障碍） | 0.2189 / 0.2179 | 15.0% |
+| pipedcylinder2d | 1501×150×450 | x[-0.5,5.5] y[-0.5,1.5] / [0,15] | 4.631 | 28213 格 4 块 2 圆柱（§2 上文） | 0.6408 / 0.6526 | 14.8% |
+
+- 全部 h5py 直读（中文路径无碍）、等距网格、采样帧无 NaN；**IVD 量纲跨数据集差 ~300×**（doublegyre τ=0.0022 vs jung 0.2189 vs pipedcylinder 0.64）→ **τ 必须逐数据集同分位**（绝对固定值不可移植，票 07 延伸定案）；
+- **时间片必须按帧比例划分**（frac）：jung 的 t 从 1.107 起、各数据集帧数 512~2001 且 dt 各异（0.0078~0.0196）——绝对秒数（10/12.5/15s）只对 pipedcylinder2d 有效；
+- 多数据集预处理产物：`outputs/datasets/<名>/{geometry,dataset,previews}` + `outputs/datasets/multi_meta.json`（逐数据集 shape/slices/taus/统计汇总；≈3.8GB，gitignore 走 Kaggle Dataset）；
+- 多数据集池（train，7 root 实测）：正 78,351 / 负 82,757 组合，池构建 ~2s；联合池量远超每 epoch 2 万样本需求（50% 过采样仅取正池 1/8）。
 
 ### 模型事实（`DeepUtils/models/segmentation/pathline_transformer.py`）
 
@@ -80,12 +97,14 @@ cylinder_vortex_pipeline/
 ├── LICENSE  NOTICE              # 随迁移代码保留 Apache 2.0 署名
 ├── geometry.py                  # 固体掩膜（逐数据集预处理；进不了模型输入）
 ├── extractor.py                 # 迹线生成（256 条/样本，7 通道，RK4+三线性插值，掩膜处理）
-├── weak_labels.py               # IVD（5×5 局部邻域均值）+ Q-criterion + 阈值标签
-├── dataset.py                   # WeakLabelPathlineDataset（h5py+memmap，on-the-fly，多数据集扩展）
-├── train_kaggle.py              # 自写训练脚本（TwoStep、断点续训、可选 DataParallel/AMP；票 07 增 --report-f1）
+├── weak_labels.py               # IVD（5×5 局部邻域均值）+ Q-criterion + 阈值标签 + 多阈值敏感性报告
+├── dataset.py                   # WeakLabelPathlineDataset（h5py+memmap，on-the-fly）+ _DatasetStore/MultiDatasetPathlineDataset（多数据集联合池，票 07 延伸）
+├── prepare_multi.py             # 多数据集逐数据集预处理驱动（geometry→IVD/label/τ→memmap+meta，票 07 延伸）
+├── train_kaggle.py              # 自写训练脚本（TwoStep、断点续训、可选 DataParallel/AMP；票 07 增 --report-f1；票 07 延伸增 --f1-split/F1+IoU）
 ├── evaluate.py                  # TTA 推理、网格投影、对比图/动画、弱定量表
 ├── kaggle/                      # 票 07：Kaggle Notebook/打包/分块/自检/操作手册
-├── config/pathline_transformer_cylinder.yaml
+├── config/pathline_transformer_cylinder.yaml  # 单数据集训练配置
+├── config/pathline_transformer_multi.yaml     # 多数据集联合训练配置（票 07 延伸）
 ├── CLAUDE.md                   # agent 入口说明（唯一权威仍是本文件）
 ├── docs/agents/                # ask-matt 配置：issue-tracker.md / triage-labels.md / domain.md
 ├── HANDOFF.md                   # 本文件
@@ -127,21 +146,22 @@ cylinder_vortex_pipeline/
 | RK4 子步 | 每输出步 4 | 三线性时空插值 |
 | patch / stride | 32×32 / 16 | 窗口起点步长 4 帧 |
 | t_scale | 0.25 | KNN 时空混合度量中 t 的权重 |
-| IVD 阈值 τ | **3.3272 / 3.16848 / 3.14344**（train/val/test，95 分位数逐时间片） | 票 04 实测（流体区统计，排除固体 0 值）；备选 μ+3σ 未用 |
-| 最小涡面积 | 5×5 | 连通域过滤 |
+| IVD 阈值 τ | **0.6539 / 0.6512 / 0.6113**（train/val/test，**85 分位**逐时间片；单数据集 abs 划分） | 票 07 延伸：p95（3.3272/3.16848/3.14344）弱标签相比论文 Fig.6 列 1 捕获稀疏（正格 4.8%）→ τ 下探至 **p85**（正格 14.8%、5×5 过滤后 9.8 连通块/帧；多阈值敏感性表 `outputs/weak_labels/multi_tau/multi_tau_stats.json`：p90=9.9%/p80=19.7%）。**多数据集 τ 逐数据集各自**（§2 盘点表：boussinesq 0.0555、cylinder2d 0.0545、doublegyre 0.0022、duffing 0.006、fourcenters 0.024、jung 0.2189、pipedcylinder2d frac 片 0.6408/0.6526） |
+| 最小涡面积 | 5×5 | 连通域过滤（票 07 延伸实测：过滤删的是 <9 格小碎片而非大涡结构，p85 下 ma9 与 ma25 覆盖差仅 0.15%，保留） |
 | epoch 样本数 | **20000**（50% 正样本） | 2026-08-25 票 07 步速校准回写：T4×2 实测 ~5s/步（DP+全精度）→ 40000×200 epoch≈110h 超预算 4×；降半 + TF32 → 预计 35~55h；下限 20000 不变 |
-| 时间划分 | 10 / 12.5 / 15 s | train/val/test |
+| 时间划分 | abs：10 / 12.5 / 15 s（**仅 1501 帧×dt=0.01 适用**）；**多数据集 frac：各数据集帧前 60% 训 / 后 40% 测（无 val，逐数据集各自）** | train/val/test 无时间泄漏（守护测试）；frac 口径（fraction_slices）对帧数/时长各异的数据集通用（§2 盘点——jung t 从 1.107 起，绝对秒数不通用） |
+| 多数据集池 | roots = 7 个 `outputs/datasets/<名>/dataset`（config/pathline_transformer_multi.yaml） | τ 与归一化逐数据集各自（各 meta ivd μ/σ、speed_max）；50% 过采样、t_scale 0.25 等与单数据集同参；留出评估 `--report-f1 --f1-split test` |
 | TTA 次数 | 5 | 平均随机 PSL 采样的概率 |
 
 ## 7. 风险与预案
 
 | 风险 | 预案 |
 |---|---|
-| 弱标签阈值敏感/循环评估 | 多阈值敏感性报告；定性为主；备选 Q-criterion 标签对照 |
+| 弱标签阈值敏感/循环评估 | 多阈值敏感性报告（**已交付**：multi_tau_report + 统计表/目检图，票 07 延伸）；定性为主；备选 Q-criterion 标签对照 |
 | **T4×2 显存与速度约束（票 07 实测）** | batch 100 单卡前向 13.5GB > 16GB → **DP 默认开**（每卡 50 ≈6.8GB，等效 batch 100）；**AMP 默认关**（上游 `propagate_features` 原地 index-put Half/Float 冲突——迁移忠实性不改 vendor；如需半精度先修 vendor 独立小票）；**TF32 开**（训练界标准，1.5~2×）；实测 ~5s/步 → samples_per_epoch 20000（§6 已回写）+ 20000 时每 epoch 200 步 |
 | Kaggle 配额/12h 会话 | 分块+每 epoch checkpoint+Dataset 版本续训；DataParallel/AMP/降样本数 |
 | 正负样本不平衡 | 50% 过采样；必要时 BCE pos_weight |
-| 涡特征微弱 | τ 下探；T_win 24→48 |
+| 涡特征微弱 | τ 下探（**已执行**：p95→p85，§6）；T_win 24→48 |
 | 迹线撞固体 | 掩膜截断+重播种；冒烟目检 |
 | KNN 时空尺度失调 | t_scale∈{0.1,0.25,1} 冒烟对比 |
 | 推理非确定 | TTA 5 次；或 random=False 确定性评估 |
@@ -212,3 +232,9 @@ AMP（独立小票，改迁移忠实性）——目标 <20h 需 A100 级硬件�
 
 - 2026-08-25 票 07 运行反馈修复八期（跨会话免重复校准 + 产物核对）：用户提供 Kaggle 输出快照核查——`Downloads/repo` = 取消时点快照（有 outputs/bench_config.yaml、无 bench_info.json/无 outputs/train/无 preview），与七期诊断一致（校准子进程在 val 评估中被取消，未写回）——**非新问题**。改进：**bench_info.json 随 checkpoint 数据集走**——① cell 7 块尾打包前 `shutil.copy2` 到 `outputs/train/bench_info.json`（模式 A `kaggle datasets version` 与模式 B zip 都携带）；② cell 3 还原时自动落入 outputs/train/；③ cell 5 来源选择 = 本会话实测 → 还原值（`kaggle.chunking.pick_bench_source` 纯函数，**+4 测试**：新优先/还原兜底/双缺 None/损坏 json fail loud——全量 159 项待跑）；④ README 说明。效果：**首会话校准一次，后续每会话省 ~18 min**（Save Version 每版本全新工作区，此前每会话重复校准）。另修复替换过程引入的预算检查 `else:` 误删（回归检查 `if total_h > 4 * 12` 块含 else 分支）。未决：无。下一步：用户 git push + 重跑 → 校准（仅首会话）→ 训练 → 块尾打包（含 bench_info）→ 下会话复用。
 - 2026-08-25 票 07 运行反馈修复七期（校准「无输出」根因与修复）：用户报告校准 1 epoch 后（1096.5s）长时无输出、手动取消（1685s）——**根因**：train_kaggle.main 的 val 触发条件 `epoch == start_epoch` 恒真 → bench 校准完成后**强制跑 val 片全量评估（20000 样本、batch 100 ≈17.5min、无进度条（evaluate 为朴素 for 循环）**——期间日志仅剩 `print`（stdout 管道块缓冲）→ 表现为「卡死」；实测取消时 val 已运行 ~10min（还差 ~7.5min 完成）。**修复**：① bench 配置 `data.val_split="none"`（跳过 val——校准只测训练步速）；② 生产 `val_freq` 5→10（val 开销从每 5 epoch 17.5min 降到每 10 epoch；~7% 块占比，2026-08-25 工程权衡）；③ notebook cell 1 `PYTHONUNBUFFERED=1`（f624183，print 实时刷）。**新事实（日志节奏）**：正常节奏 = 校准 ~18min → 训练 tqdm 17.6min/epoch → 每 10 epoch 停顿 ~17.5min（val，无进度条）；取消本次运行无损失（bench ckpt 在 outputs/bench 独立目录、未写 bench_info——下个版本重测校准即可）。未决：无。下一步：用户 git push + 重跑 → 校准 18min 后直接进入训练（无中途长停顿）→ 块尾打包 → 下载 preview 图复核。
+- 2026-08-25 **票 07 延伸（多数据集 + τ 对齐论文 Fig.6）**：用户目标 = ① 弱标签 IVD 阈值对齐论文 Fig.6 列 1（IVD 在该数据集的白色等值线呈现——"appropriate threshold"，论文 §4.3 明示 IVD"highly sensitive to threshold selection"）；② 按论文 §4.2 评估范式（多数据集训练 → 真实数据测试，未接触测试数据）做**多数据集联合训练 + 跨数据集留出评估**。**口径说明（诚实性）**：本实现为**时间留出近似**——各数据集自身前 60% 参与训练、后 40% 时间上未见（且覆盖 7 类不同流场，跨分布泛化观察）；**非**论文语义的严格零样本（严格零样本须按数据集留出：部分数据集完全不参与训练；用户拍板按时间 60/40，未采用按数据集留出——如未来需要严格零样本，可另配留出数据集划分）。**执行前拍板（用户确认）**：τ = **p85 逐时间片分位**、5×5 面积过滤保留、**按时间各数据集帧前 60% 训/后 40% 测（无 val）**、τ/归一化**逐数据集各自**、训练池 = **全部 7 个数据集**（6 新 + pipedcylinder2d）。
+  **需求 A（τ 对齐）**：多阈值敏感性报告落地 `weak_labels.multi_tau_report` + CLI `--multi-tau-dir`（候选 = 95/90/85/80 分位 × 固定 2.5/2.0/1.5/1.0 × min_area 25/9/1；统计 = 正格占比/连通块数/正样本占比；目检图含论文风格白色等值线）。**实测结论（pipedcylinder2d，流体区）**：p95 正格 4.81% 且涡块 6.8/帧（稀疏——用户观察一致）→ **p90 = 9.90%（τ≈1.08-1.18、块 6.98——覆盖率翻倍但结构块数不变：新增标签主要"填补"涡街/拐角回流，碎片新增少）**；p85 = 14.80%（τ≈0.61-0.65、块 9.82）；p80 = 19.73%（块 12.23、碎片 38.8/帧若不过滤）；**5×5 过滤在 p85 处仅删 0.15% 正格但消掉 ~15 碎片块/帧 → 保留（未吞大涡结构）**。用户拍板 p85（更饱满）+ 保留 5×5。**实现**：τ 默认 95→85（weak_labels.DEFAULT_PERCENTILE + compute_tau/prepare_dataset/CLI 默认，HANDOFF §6 回写）；**默认已回写 → 已训练的 25-epoch 模型为旧 τ（p95）标签，新 τ 标签需重训（用户 Kaggle 执行，单数据集产出 `outputs/dataset` 已本地重生成 p85 标签：taus=0.6539/0.6512/0.6113）**；preview 三联图标题明示两语义（"IVD reference (continuous)" vs "Weak label (binary train target)"）。
+  **需求 B（多数据集）**：① `dataset.fraction_slices`（按帧比例 60/40/可选 val；floor 取整、全覆盖无泄漏——守护测试）；`prepare_dataset` 增 `split_mode=abs|frac` + CLI；② dataset.py 重构：`_DatasetStore`（单数据集存储/提取/池，池判定-标签-提取一致性不变）→ `WeakLabelPathlineDataset` 包装（公开面与票 05 逐字节兼容——单数据集续训采样序不变）+ `MultiDatasetPathlineDataset`（7 roots 联合池 (ds_idx,y0,x0,frame)，50% 过采样/自然分布/sample_at(si,...)/stores 公开；组合级 rng 基含 ds_id 派生——同语义不同构）；③ train_kaggle：`_make_dataset` 接受 `data.root` 列表、`evaluate_f1` 增 **IoU**（tp/(tp+fp+fn)）、`--f1-split`（默认 val_split；多数据集无 val → `--report-f1 --f1-split test` 对留出 40% 出自然分布 F1/IoU，缺少指定片 fail loud）；④ preview_eval：`--dataset` 索引跨数据集推理（单 ckpt → 各数据集 test 片，时间留出泛化观察的简版落地——非严格零样本，见本条目口径说明）+ 标题语义标注；⑤ `prepare_multi.py` 逐数据集预处理驱动（geometry→IVD/label/τ→memmap+meta+目检图，复用票 02/05 管线）；`kaggle/prepare_dataset_a.py` 增 `--nc/--dataset-dir` 多对打包（data/<nc> + datasets/<名>/ 布局 + manifest，单数据集布局不变）；⑥ `config/pathline_transformer_multi.yaml`（7 roots、frac、val_split none、run_name 独立）。
+  **验证证据**：全量 **186 passed**（159 基线 + 27 新增：多阈值报告 3、fraction_slices 6、多数据集池 6、train 集成 4、IoU 1、preview 2、packaging 2、prepare_multi 3）；真实数据 = 7 数据集预处理产物 `outputs/datasets/`（§2 盘点表；≈3.8GB）+ 多数据集池实测（train 正 78,351/负 82,757、构建 2.0s、跨数据集样本有限性/逐数据集归一化/确定性序 all ✓）+ test 片自然分布 F1/IoU 评估跑通（随机初始化小模型：n=16384, F1=0.281, IoU=0.163——管线正确性检查）+ 跨数据集预览（25-epoch 基线模型 → 未见过的 duffing 帧 350：`outputs/preview/multi_duffing_t350.png`）。
+  **执行边界**：新 τ 标签的单数据集重训、多数据集 200 epoch 联合训练与留出评估级报告 = **用户 Kaggle 执行**（`--config config/pathline_transformer_multi.yaml --report-f1 --f1-split test`；Dataset A 打包 `python kaggle/prepare_dataset_a.py --nc <7 个> --dataset-dir <7 个> --out kaggle_dataset_a_multi --zip`）。
+  **未决**：① 多数据集 Kaggle Notebook 需按 `kaggle/README.md` 新增 §7 说明适配挂载布局（本地/代码侧已就绪）；② 正式弱定量表（网格投影级）仍属票 08；③ doublegyre/jung 的"圆柱"检出声明的单格噪声点（无实质障碍物；掩膜仅 4/12 格，属预期噪声处理——HANDOFF §2 已记录判据：圆柱 = 孤立连通块、无尺寸判据）。下一步：用户 git push（票 07 延伸 commit）→ 单数据集重训（p85）/多数据集联合训练 → 票 08。

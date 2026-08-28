@@ -130,6 +130,14 @@ class TestEvaluateF1:
         assert r["recall"] == pytest.approx(0.5)
         assert r["f1"] == pytest.approx(0.5)
 
+    def test_iou_literal(self):
+        """IoU（票 07 延伸：留出评估指标） = tp/(tp+fp+fn)：全判正（tp=16,
+        fp=16, fn=0）→ IoU = 16/32 = 0.5（手算字面量）。"""
+        from train_kaggle import evaluate_f1
+        r = evaluate_f1(ConstPredModel(0.9), make_loader(), device="cpu")
+        assert r["iou"] == pytest.approx(0.5)
+        assert r["tp"] == 16 and r["fp"] == 16 and r["fn"] == 0
+
     def test_empty_loader_raises(self):
         """空 loader：报错而非静默返回 0（无样本时 F1 无意义）。"""
         from torch.utils.data import DataLoader
@@ -191,7 +199,7 @@ class TestReportF1CLI:
         f1_path = ckpts / "pathline_transformer_cylinder_val_f1.json"
         assert f1_path.exists()
         data = json.loads(f1_path.read_text(encoding="utf-8"))
-        for k in ("tp", "fp", "fn", "tn", "precision", "recall", "f1", "n",
+        for k in ("tp", "fp", "fn", "tn", "precision", "recall", "f1", "iou", "n",
                   "split", "epoch", "threshold"):
             assert k in data, f"缺失字段 {k}"
         assert data["split"] == "val"
@@ -424,6 +432,33 @@ class TestBuildDatasetA:
             got = zf.read("dataset/u.npy")
             assert hashlib.sha256(got).hexdigest() == \
                 hashlib.sha256((ds_dir / "u.npy").read_bytes()).hexdigest()
+
+    def test_multi_layout_and_manifest(self, tmp_path):
+        """多数据集打包（票 07 延伸）：data/<nc> + datasets/<name>/ 布局 + manifest。"""
+        import json
+        from kaggle.prepare_dataset_a import build_dataset_a_multi
+        nc1 = tmp_path / "boussinesq.nc"; nc1.write_bytes(b"NC1")
+        nc2 = tmp_path / "cylinder2d.nc"; nc2.write_bytes(b"NC2")
+        ds1 = make_fake_dataset_dir(tmp_path / "ds1")
+        ds2 = make_fake_dataset_dir(tmp_path / "ds2")
+        out = tmp_path / "out_multi"
+        manifest = build_dataset_a_multi([(str(nc1), str(ds1)), (str(nc2), str(ds2))],
+                                         str(out))
+        for rel in ("data/boussinesq.nc", "data/cylinder2d.nc",
+                    "datasets/ds1/meta.json", "datasets/ds2/meta.json",
+                    "datasets/ds2/u.npy"):
+            assert (out / rel).exists(), rel
+        m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+        assert m["total_bytes"] > 0
+        for f in m["files"]:
+            assert (out / f["path"]).exists()
+        assert not (out / "dataset").exists()          # 单数据集布局不混用
+
+    def test_multi_pairs_mismatch_raises(self, tmp_path):
+        """--nc 与 --dataset-dir 个数不匹配 → ValueError（防错配静默）。"""
+        from kaggle.prepare_dataset_a import main as pa_main
+        with pytest.raises(ValueError):
+            pa_main(["--nc", "a.nc", "b.nc", "--dataset-dir", "ds1", "--out", "x"])
 
 
 # ================================================================ 切片 F：Notebook 环境自检（kaggle/self_check.py）

@@ -30,6 +30,55 @@ def _sha256_file(path):
     return h.hexdigest()
 
 
+def build_dataset_a_multi(pairs, out_dir):
+    """多数据集 Dataset A 组装（票 07 延伸：7 数据集联合训练）。
+
+    pairs = [(nc 路径, prepare_dataset 产物目录), ...]（一一对应，调用方保证
+    配对顺序）。布局：
+      <out>/data/<nc 文件名>          各数据集原始 nc
+      <out>/datasets/<目录名>/ ...    各 prepare_dataset 产物（meta.json + memmap）
+    manifest.json 与单数据集同构（逐文件 sha256，Kaggle 端自检清单）。
+    返回 manifest dict。
+    """
+    out_dir = pathlib.Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    files = []           # (相对路径, 绝对路径)
+    used_names = set()
+    for nc_path, ds_src in pairs:
+        nc_path = pathlib.Path(nc_path)
+        ds_src = pathlib.Path(ds_src)
+        if not nc_path.exists():
+            raise FileNotFoundError(f"nc 数据文件不存在: {nc_path}")
+        if not ds_src.exists():
+            raise FileNotFoundError(f"prepare_dataset 产物目录不存在: {ds_src}")
+        files.append((pathlib.Path("data") / nc_path.name, nc_path))
+        name = ds_src.name
+        if name in used_names:
+            raise ValueError(f"数据集目录名重复: {name}（manifest 路径歧义）")
+        used_names.add(name)
+        for p in sorted(ds_src.rglob("*")):
+            if p.is_file():
+                files.append((pathlib.Path("datasets") / name
+                              / p.relative_to(ds_src), p))
+
+    manifest_files = []
+    total = 0
+    for rel, src in sorted(set(files), key=lambda x: str(x[0])):
+        rel = pathlib.Path(rel)
+        dst = out_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(src), str(dst))
+        size = dst.stat().st_size
+        total += size
+        manifest_files.append({"path": rel.as_posix(), "size": size,
+                               "sha256": _sha256_file(str(dst))})
+    manifest = {"files": manifest_files, "total_bytes": total,
+                "multi": True, "datasets": [str(p) for p in pairs]}
+    (out_dir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    return manifest
+
+
 def build_dataset_a(nc_path, dataset_dir, out_dir, aux_dirs=None):
     """组装 Dataset A 目录 → manifest dict（逐文件 shasum，可作 Kaggle 端自检清单）。
 
@@ -98,18 +147,30 @@ def make_zip(out_dir, zip_path):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Kaggle Dataset A 打包：nc + prepare_dataset 产物 → 上传目录/zip")
-    ap.add_argument("--nc", required=True, help="nc 数据文件路径（h5py 直读，支持中文路径）")
-    ap.add_argument("--dataset-dir", default="outputs/dataset",
-                    help="prepare_dataset 产物目录（meta.json + memmap）")
+        description="Kaggle Dataset A 打包：nc + prepare_dataset 产物 → 上传目录/zip"
+                    "（多数据集：--nc/--dataset-dir 可各传多个，一一对应）")
+    ap.add_argument("--nc", nargs="+", required=True,
+                    help="nc 数据文件路径（h5py 直读，支持中文路径；多个 = 多数据集）")
+    ap.add_argument("--dataset-dir", nargs="+", required=True,
+                    help="prepare_dataset 产物目录（meta.json + memmap；与 --nc 一一对应）")
     ap.add_argument("--out", default="kaggle_dataset_a", help="输出目录")
     ap.add_argument("--aux-dirs", nargs="*", default=None,
-                    help="可选 aux 目录（weak_labels 目检图，仅复制 .png）")
+                    help="可选 aux 目录（仅单数据集：weak_labels 目检图，只复制 .png）")
     ap.add_argument("--zip", action="store_true", help="额外打包 zip")
     args = ap.parse_args(argv)
 
-    manifest = build_dataset_a(args.nc, args.dataset_dir, args.out,
-                               aux_dirs=args.aux_dirs)
+    if len(args.nc) != len(args.dataset_dir):
+        raise ValueError(
+            f"--nc ({len(args.nc)}) 与 --dataset-dir ({len(args.dataset_dir)}) "
+            f"个数不匹配，须一一对应")
+    if len(args.nc) == 1:
+        manifest = build_dataset_a(args.nc[0], args.dataset_dir[0], args.out,
+                                   aux_dirs=args.aux_dirs)
+    else:
+        if args.aux_dirs:
+            raise ValueError("多数据集打包不支持 --aux-dirs（aux 图放各数据集目录内）")
+        manifest = build_dataset_a_multi(list(zip(args.nc, args.dataset_dir)),
+                                         args.out)
     print(f"Dataset A 已组装: {args.out}")
     print(f"  文件数 = {len(manifest['files'])}  总大小 = "
           f"{manifest['total_bytes'] / 1e6:.1f} MB")
