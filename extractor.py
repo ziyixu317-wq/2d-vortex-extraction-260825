@@ -516,9 +516,12 @@ def _integrate_batched(u, v, mask, seeds, t0, dt_out, L, xdim, ydim, tdim,
             gy = (py[out_ok] - ydim[0]) / dy
             i = np.floor(gx + 0.5).astype(np.intp)
             j = np.floor(gy + 0.5).astype(np.intp)
-            inb = (i >= 0) & (i < X) & (j >= 0) & (j < Y)
-            inb &= m2[j, i]                       # 越界段已由 out_ok 排除，此守护防错
-            in_solid[out_ok] = inb
+            # 半格容差内的位置一律按**裁剪索引**取边界格掩膜（out_ok 已排除真出域）：
+            # 网格非整跨度（linspace/生成器舍入使 (ydim[-1]-ydim[0])/dy > Y-1，
+            # 票 07 延伸四期实测 jung 199.0000628）时上缘半格内 floor 取整可为 Y →
+            # 未裁剪 m2[j,i] 越界崩溃（标量 mask_at 对越界返回 False 不崩，批式补守卫）；
+            # 边界格为固体时批式在此冻结——比标量（越界视为流体）更物理。
+            in_solid[out_ok] = m2[np.clip(j, 0, Y - 1), np.clip(i, 0, X - 1)]
         dead = ~out_ok | in_solid
         if dead.any():
             active[idx[dead]] = False            # 失效者不采纳该步（行已冻结为 step-1）
