@@ -488,6 +488,62 @@ class TestBuildDatasetA:
             pa_main(["--nc", "a.nc", "b.nc", "--dataset-dir", "ds1", "--out", "x"])
 
 
+# ================================================================ 切片 I：挂载布局探测（kaggle/mount_probe.py，票 07 延伸运行反馈）
+
+class TestMountProbe:
+    """Dataset A 挂载布局探测（Kaggle 多级嵌套 /kaggle/input/datasets/<owner>/<slug>/）。
+
+    票 07 三期实测：挂载 = {root}/datasets/<owner>/<slug>/...（多级嵌套）；本切片
+    用 tmp 树复现嵌套与浅层两种布局，守护 probe_layout 深度优先命中。
+    """
+
+    @staticmethod
+    def _write_fake_meta(dataset_dir):
+        import json
+        (dataset_dir / "meta.json").write_text(
+            json.dumps({"slices": {"train": [0, 1], "test": [1, 2]}}),
+            encoding="utf-8")
+
+    def test_nested_multi_layout(self, tmp_path):
+        """Kaggle 嵌套挂载：root/datasets/ziyixu317/dataset-a-multi/{data,datasets/<名>/dataset}。"""
+        from kaggle.mount_probe import probe_layout
+        mount = tmp_path / "datasets" / "ziyixu317" / "dataset-a-multi"
+        (mount / "data").mkdir(parents=True)
+        (mount / "data" / "boussinesq.nc").write_bytes(b"x")
+        for name in ("boussinesq", "pipedcylinder2d"):
+            d = mount / "datasets" / name / "dataset"
+            d.mkdir(parents=True)
+            self._write_fake_meta(d)
+        single, multi = probe_layout(str(tmp_path))
+        assert multi == mount
+        assert single is None
+
+    def test_nested_single_layout(self, tmp_path):
+        """Kaggle 嵌套单数据集：root/datasets/owner/2d-.../{<nc>,dataset/meta.json}。"""
+        from kaggle.mount_probe import probe_layout
+        mount = tmp_path / "datasets" / "ziyixu317" / "2d-unsteady-cylinder"
+        (mount / "dataset").mkdir(parents=True)
+        (mount / "pipedcylinder2d.nc").write_bytes(b"x")
+        self._write_fake_meta(mount / "dataset")
+        single, multi = probe_layout(str(tmp_path))
+        assert single == mount
+        assert multi is None
+
+    def test_shallow_single_layout(self, tmp_path):
+        """浅层单数据集（root/dataset/meta.json）同样命中。"""
+        from kaggle.mount_probe import probe_layout
+        (tmp_path / "dataset").mkdir()
+        self._write_fake_meta(tmp_path / "dataset")
+        single, multi = probe_layout(str(tmp_path))
+        assert single == tmp_path and multi is None
+
+    def test_no_layout_returns_none(self, tmp_path):
+        """无命中 → (None, None)（调用方走 zip 解压回退/fail loud）。"""
+        from kaggle.mount_probe import probe_layout
+        (tmp_path / "anything").mkdir()
+        assert probe_layout(str(tmp_path)) == (None, None)
+
+
 # ================================================================ 切片 F：Notebook 环境自检（kaggle/self_check.py）
 
 class TestSelfCheck:

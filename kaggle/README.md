@@ -115,10 +115,11 @@ python kaggle\prepare_dataset_a.py --nc <7 个 nc 路径> --dataset-dir <7 个 o
 #                 nc 仅为重算来源；notebook 布局探测不受影响）
 ```
 
-Notebook 适配（已在 ipynb 内自动完成，无需手动改）：cell 3 探测 `datasets/` 目录 →
-`config/pathline_transformer_multi.yaml` + 逐数据集 symlink；单数据集布局（`dataset/meta.json`）
-则走原路径。**注意**：Kaggle 上传数据集名（slug 含多级目录）与本地目录名需一致化——
-打包的 `datasets/<名>/` 名即本地 `outputs/datasets/<名>` 名，zip 内布局即最终布局。
+Notebook 适配（已在 ipynb 内自动完成，无需手动改）：cell 3 用 `kaggle/mount_probe.probe_layout`
+**深度递归探测**挂载（Kaggle 嵌套挂载 `datasets/<owner>/<slug>/` 自动命中）→ 判别 `datasets/<名>/
+dataset/meta.json`（多）或 `dataset/meta.json`（单）→ 自动选 config + 逐数据集 symlink。**注意**：
+Kaggle 上传数据集名（slug 含多级目录）与本地目录名需一致化——打包的 `datasets/<名>/` 名即本地
+`outputs/datasets/<名>` 名，zip 内布局即最终布局。
 
 训练与留出评估（cell 6 训练命令）：
 
