@@ -151,6 +151,7 @@ run_name/ckpt_dir 各不相同（`pathline_transformer_multi` vs
 | 带 `amp: true` 时报 `Index put requires the source and destination dtypes match` | 上游模型不兼容 AMP（Half/Float 原地赋值）；按上面默认关 AMP，显存交给 DP 拆分 |
 | 步速校准远超 7.5h/块 | 属预期（单 epoch > 预算时每块至少 1 epoch）；可降 `samples_per_epoch`（下限 20000，HANDOFF §6）或启用 YAML `amp/data_parallel` |
 | 会话断在训练中途 | `ckpt_latest.pth` 每 epoch 更新；重启会话 Run All 自动续（loss 从该 epoch 位置继续） |
+| cell 6 报 `FileNotFoundError: 'outputs/bench_info.json'` | 跨会话复用路径下 cell 5 走还原值分支曾不写本会话基准文件（八期缺口，九期修复：cell 5 恒写 `outputs/bench_info.json`）；拉取最新 notebook（重传或粘贴新 cell 5）后重启会话重跑 |
 | `kaggle datasets version` 报错 | API key 缺 scope（须 Create+Read+Write）/ slug 拼写 / 数据集不存在（先建占位） |
 | 磁盘不足（/kaggle/working 12GB） | `outputs/bench` 与 `outputs/train` 各占几 MB~数百 MB；memmap 走 symlink（不复制）；必要时删 `outputs/bench` |
 | 想要确定步速上限做预分配 | 参考 HANDOFF §5：T4 单卡 0.8~1.3s/步 → 40000 样本/100 batch = 400 步/epoch → 5.3~8.7 min/epoch |
