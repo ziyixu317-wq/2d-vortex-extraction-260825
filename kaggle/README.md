@@ -127,6 +127,9 @@ Kaggle 上传数据集名（slug 含多级目录）与本地目录名需一致�
 python train_kaggle.py --config config/pathline_transformer_multi.yaml \
     --resume auto --epochs <块目标>          # 与单数据集同分块/续训机制
 # 训练完成后（收尾 cell 8）留出 40% 自然分布 F1/IoU：
+#   最后一块 cell 6 已自动带 --report-f1 --f1-split test（notebook 按 val_split=none
+#   条件补全，2026-08-29 修）→ 自动产出 outputs/train_multi/*_test_f1.json；
+#   手动等价命令：
 python train_kaggle.py --config config/pathline_transformer_multi.yaml \
     --epochs <当前进度> --report-f1 --f1-split test   # → outputs/train_multi/*_test_f1.json
 ```
