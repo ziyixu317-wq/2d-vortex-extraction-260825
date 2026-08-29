@@ -64,6 +64,6 @@
 - **实测进度**：首块 43 epoch（loss 0.2685→0.0873，3.0-3.1 s/步 ≈ 10.2 min/epoch，HANDOFF §11 实测回填一）；第二块 43→86 完成（loss 0.0859→0.0811，无回退；cell 7 打包修复后成功：ckpt_snapshot.zip 10.3MB）。
 - **运行反馈修复**：① 嵌套挂载探测（mount_probe，多级 rglob）；② cell 2 强制重克隆；③ cell 4 自检数据根布局自适应；④ 批式积分域边缘越界（非整跨度网格，test_edge_fringe）；⑤ cell 7 打包路径 CKPT_DIR 化；⑥~⑨ 详见 HANDOFF §11（八期 bench 复用；**九期：cell 5 恒写 bench_info.json——跨会话复用路径下 cell 6 崩溃的落地缺口**）。
 - **用户决策 1（结算标准）**：200→**130 epoch**（43-86 loss 已趋稳；config `train.epochs=130`，86 续跑 44；最后一块自动 `--report-f1 --f1-split test`）。
-- **用户决策 2（数据质量）**：**forceddampedduffing2d 移出训练池**（roots 7→6；用户判定该数据集有问题——具体原因待披露，HANDOFF §2 注记；Kaggle Dataset A 无需重传）。
+- **用户决策 2（数据质量）**：**forceddampedduffing2d 移出训练池**（roots 7→6；**问题实证 2026-08-29**：文件无结构缺陷——netCDF4/h5py 读写正常、与参考数据集逐字段同构；ParaView 打开显示 1×1×1 退化网格 + `vtkPVImageSliceMapper: Incorrect dimensionality` = ParaView reader 路径问题（被当 Image 而非 rectilinear grid，非数据内容错误）；用户保持移出：常规复核工具不可用→可信度受损，且该数据集贡献最小（正格 8.3% 最低）；详见 HANDOFF §2 注记。Kaggle Dataset A 无需重传）。
 - 待回填（130 完成后）：`pathline_transformer_multi_test_f1.json`（F1/IoU/tp/fp/fn/n）、checkpoint 位置、分块会话数 → 勾选上方验收项 + HANDOFF §2/§5/§6/§11。
 
