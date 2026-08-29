@@ -51,7 +51,7 @@ Kaggle Notebook 通过 `git clone https://github.com/ziyixu317-wq/2d-vortex-extr
 
 1. Kaggle → Datasets → New Dataset：先建一个**空**数据集（占位 slug，如 `yourname/vortex-train-ckpt`），notebook 的 `CKPT_DATASET_SLUG` 填该 slug；
 2. Notebook → Add-ons → Secrets：添加 `KAGGLE_USERNAME` / `KAGGLE_KEY`（Kaggle 个人设置页生成 API key）→ Settings 里把两个 secret 挂到本 notebook；
-3. 之后笔记本内 `kaggle datasets version` 会在块尾自动发布新版本，下次会话 `kaggle datasets download --unzip` 自动还原 `outputs/train/`。
+3. 之后笔记本内 `kaggle datasets version` 会在块尾自动发布新版本，下次会话 `kaggle datasets download --unzip` 自动还原 `outputs/<ckpt_dir>/`（单数据集 = `outputs/train`；多数据集 = `outputs/train_multi`——统一由 config `train.ckpt_dir` 派生，五期修复）。
 
 不配置（模式 B，手动）则跳过：每次会话把上一会话的 `ckpt_snapshot.zip`（在 `/kaggle/working`，会话结束前下载）上传为 Dataset 并 Add Input；或挂载上一会话输出的 checkpoint 目录。
 
@@ -66,14 +66,14 @@ Kaggle Notebook 通过 `git clone https://github.com/ziyixu317-wq/2d-vortex-extr
 | 3 | 挂载 Dataset A + 还原 checkpoint | `outputs/dataset/`（symlink） |
 | 4 | **验收 1**：环境自检（vendor import + 数据加载 + 模型前向） | 自检打印 |
 | 5 | **验收 2**：1 epoch 实测步速（全量样本，**跳过 val**）+ 预算检查 | `outputs/bench_info.json` + 分块计划（校准 ≈17.6 min） |
-| 6 | **验收 3**：分块训练（本块 1 块；`--resume auto` 续训；每 10 epoch 一次 val ≈17.5min） | `outputs/train/*ckpt_latest.pth` 每 epoch + E 里程碑 |
+| 6 | **验收 3**：分块训练（本块 1 块；`--resume auto` 续训；每 10 epoch 一次 val ≈17.5min） | `outputs/<ckpt_dir>/*ckpt_latest.pth` 每 epoch + E 里程碑（单=outputs/train；多=outputs/train_multi） |
 | 7 | 块尾打包（模式 A 发布 Dataset 新版本 / 模式 B 手动下载） | `ckpt_snapshot.zip` |
 | 8 | **验收 4**：训练完成后打印 val F1 + 最终归档 | `final_ckpt.zip` + `val_f1.json` |
 | 9 | （可选）**中途预览**：单帧 模型 vs IVD vs 弱标签三联图 | `outputs/preview/prob_vs_ivd_t1300.png` |
 
-**日志节奏提示**：校准后若无输出，是在跑 val 评估（无进度条、约 17.5 分钟；`PYTHONUNBUFFERED=1` 后 print 实时）。正常节奏 = 校准（~18 min）→ [train] epoch 1 训练 tqdm（200 步 × ~5.3s ≈ 17.6 min/epoch）→ 每 10 epoch 停顿 ~17.5 min 跑 val。
+**日志节奏提示**：校准后若无输出，是在跑 val 评估（无进度条、约 17.5 分钟；`PYTHONUNBUFFERED=1` 后 print 实时）。正常节奏 = 校准（~18 min）→ [train] epoch 1 训练 tqdm（200 步 × ~5.3s ≈ 17.6 min/epoch）→ 每 10 epoch 停顿 ~17.5 min 跑 val。**多数据集线（票 07 延伸实测回填一）**：校准 1 epoch ≈ 10.85 min；训练步速 3.0-3.1 s/步 ≈ 10.2 min/epoch（200 epoch ≈ 34h ≈ 5 会话；epoch 1 1260.2s / epoch 2 1876.9s / epoch 3 2487.8s / epoch 4 3087.6s，loss 0.2685→0.1618——数据管线去抖：pipedcylinder 单独采样时 53ms+页故障尖峰 vs 其余 39-43ms，多数据集池占 1/7）。
 
-**跨会话免重复校准**：`bench_info.json` 会在 cell 7 块尾打包时随 checkpoint 数据集一起保存（`outputs/train/bench_info.json`），下个会话 cell 3 还原后 cell 5 自动复用（优先本会话实测 → 还原值），打印来源——**首个会话校准一次，后续会话省 ~18 min/会话**。
+**跨会话免重复校准**：`bench_info.json` 会在 cell 7 块尾打包时随 checkpoint 数据集一起保存（`outputs/<ckpt_dir>/bench_info.json`，单=outputs/train、多=outputs/train_multi），下个会话 cell 3 还原后 cell 5 自动复用（优先本会话实测 → 还原值），打印来源——**首个会话校准一次，后续会话省 ~18 min/会话**。
 
 **每会话一块**（`CHUNK_BUDGET_H=7.5h`，来自 12h 硬上限留自检/打包余量；`kaggle/chunking.py` 的 `plan_chunks` 是参数化纯函数——其测试用 8h 预算仅为算例，notebook 实际传 7.5h）；块尾打包 checkpoint 后本会话结束——**重启会话再 Run All** 即从 latest 无损续训（`--resume auto`：checkpoint 含 optimizer/scheduler 状态，采样序按 (seed, epoch) 确定性重建）。**步速实测基准（2026-08-25 Kaggle T4×2 DP + TF32 + 20000 样本）**：~5.3 s/步 → ~17.6 min/epoch → 200 epoch ≈ **59h ≈ 8 个会话**（TF32 实测收益 <10%：KNN 距离计算与 softmax 为逐元素/归约操作，TF32 仅加速 matmul；该基准已写入 `bench_info.json`，回填 HANDOFF §6/§11）。
 
