@@ -2,13 +2,18 @@
 #
 # 与单数据集配置（pathline_transformer_cylinder.yaml）的差异（HANDOFF §1 决策 8
 # 落实 + §6 参数表更新）：
-# - data.root = 7 个 prepare_dataset 产物目录列表（含既有 pipedcylinder2d；
-#   各目录由 prepare_multi.py 逐数据集预处理生成，mask 随数据集、不进模型输入）；
+# - data.root = 6 个 prepare_dataset 产物目录列表（含既有 pipedcylinder2d；
+#   各目录由 prepare_multi.py 逐数据集预处理生成，mask 随数据集、不进模型输入）。
+#   2026-08-29 用户决策：**forceddampedduffing2d 移出训练池**（用户判定该数据集
+#   有问题，7→6 roots）。Kaggle Dataset A 无需重传——config root 即训练池唯一
+#   来源，cell 3 多链接的目录不参与池构建/训练（本地打包目录可留可删）；
 # - 时间划分 = frac 60/40（各数据集帧前 60% 训 / 后 40% 测，无 val 片）——
 #   训练期无 val 监控（main 警告并跳过）；留出评估用
 #   `--report-f1 --f1-split test`（跨数据集 test 片自然分布 F1/IoU 记录）；
 # - τ/归一化逐数据集各自（各 meta 的 p85 分位 τ、ivd μ/σ、speed_max）；
-# - run_name/ckpt_dir 独立（与单数据集训练产物不混写）。
+# - run_name/ckpt_dir 独立（与单数据集训练产物不混写）；
+# - **结算口径 130 epoch**（2026-08-29 用户决策：43-86 loss 已趋稳（0.0873→
+#   0.0811），86 续跑 44 → 130 结算，原 200 中止——HANDOFF §11）。
 #
 # 用法：python train_kaggle.py --config config/pathline_transformer_multi.yaml \
 #           [--report-f1 --f1-split test]
@@ -19,7 +24,6 @@ data:
     - outputs/datasets/boussinesq/dataset
     - outputs/datasets/cylinder2d/dataset
     - outputs/datasets/doublegyre2d/dataset
-    - outputs/datasets/forceddampedduffing2d/dataset
     - outputs/datasets/fourcenters2d/dataset
     - outputs/datasets/jungtelziemniak2d/dataset
     - outputs/datasets/pipedcylinder2d/dataset
@@ -59,7 +63,7 @@ model:
 
 # ---------------------------------------------------------------------------- 训练
 train:
-  epochs: 200
+  epochs: 130                     # 2026-08-29 用户决策：130 结算（原 200 中止；见头注释）
   lr: 0.0001
   weight_decay: 0.000001
   warmup_epochs: 60

@@ -19,7 +19,7 @@
 
 1. **训练标签**：直接用 IVD/Q-criterion 阈值给仿真数据打**弱标注**（标签 = 迹线种子点处 IVD ≥ τ）。**不走** Vatistas 参数拟合/合成数据管线。
 2. **模型**：论文主体的迹线 Transformer，**从头训练**；不使用仓库预训练权重与 demo 验证集（用户已在 Kaggle 验证过模型可用）。
-3. **训练**：Kaggle T4×2，**200 epoch**；本地（核显、torch 2.10.0+cpu、无 CUDA）只做 CPU 冒烟。
+3. **训练**：Kaggle T4×2，**200 epoch**；本地（核显、torch 2.10.0+cpu、无 CUDA）只做 CPU 冒烟。（2026-08-29 多数据集线**结算口径改为 130 epoch**：43-86 loss 已趋稳（0.0873→0.0811），用户拍板 130 结算、原 200 中止；§5/§6/§11 已回写。单数据集线（暂缓）仍 200。）
 4. **评估**：定性对比（IVD/Q-criterion 为参考）+ 弱定量表；不涉及 Vatistas 验证集。
 5. **不做 ivd 遮除消融**：IVD 是公认高精度涡判据，模型学习其近似是可接受且预期的。
 6. **迹线口径 = 256 条**：64 组 × 4 卫星点（不含中心），`KpathlinePerGroup=4`，对齐论文与发布数据。
@@ -42,6 +42,11 @@
 
 ### 多数据集盘点（票 07 延伸实测 2026-08-25，`CFD数据集/` 下 6 个新数据集 + 既有 pipedcylinder2d）
 
+> 注（2026-08-29）：**forceddampedduffing2d 已移出训练池**（用户判定该数据集有问题；
+> `config/pathline_transformer_multi.yaml` roots 7→6，本行保留作盘点记录）。
+> Kaggle Dataset A 无需重传——config root 即训练池唯一来源，cell 3 多链接的目录
+> 不参与池构建/训练（本地打包目录可留可删）。
+
 | 数据集 | (T,Y,X) | 域 / t 范围 | speed_max | 固体（全帧取与 \|v\|<1e-5） | τ（p85，train/test frac 片） | 标签正格（流体区） |
 |---|---|---|---|---|---|---|
 | boussinesq | 2001×450×150 | x[-0.5,0.5] y[-0.5,2.5] / [0,20] | 1.254 | 242 格 1 块（≤1 圆柱，有 obstacle_pos/radius 元数据） | 0.0555 / 0.5955 | 14.3% |
@@ -55,7 +60,7 @@
 - 全部 h5py 直读（中文路径无碍）、等距网格、采样帧无 NaN；**IVD 量纲跨数据集差 ~300×**（doublegyre τ=0.0022 vs jung 0.2189 vs pipedcylinder 0.64）→ **τ 必须逐数据集同分位**（绝对固定值不可移植，票 07 延伸定案）；
 - **时间片必须按帧比例划分**（frac）：jung 的 t 从 1.107 起、各数据集帧数 512~2001 且 dt 各异（0.0078~0.0196）——绝对秒数（10/12.5/15s）只对 pipedcylinder2d 有效；
 - 多数据集预处理产物：`outputs/datasets/<名>/{geometry,dataset,previews}` + `outputs/datasets/multi_meta.json`（逐数据集 shape/slices/taus/统计汇总；≈3.8GB，gitignore 走 Kaggle Dataset）；
-- 多数据集池（train，7 root 实测）：正 78,351 / 负 82,757 组合，池构建 ~2s；联合池量远超每 epoch 2 万样本需求（50% 过采样仅取正池 1/8）。
+- 多数据集池（train，7 root 实测：正 78,351 / 负 82,757 组合，池构建 ~2s；联合池量远超每 epoch 2 万样本需求（50% 过采样仅取正池 1/8）。**2026-08-29 起 6 root（duffing 移除），池量相应减小，口径不变**）。
 
 ### 模型事实（`DeepUtils/models/segmentation/pathline_transformer.py`）
 
@@ -82,7 +87,7 @@
 
 验收标准（全部满足才算完成）：
 1. 预测涡区域与 IVD/Q-criterion 参考结构一致（涡街、拐角回流区），无明显碎裂噪声
-2. 200 epoch 训练完成，checkpoint 归档，训练可跨 Kaggle 会话断点续训
+2. 200 epoch 训练完成，checkpoint 归档，训练可跨 Kaggle 会话断点续训（**2026-08-29 多数据集线结算口径改 130 epoch**——用户决策，§11；单数据集线仍 200）
 3. 交付：多个代表性时间步的对比图 + mp4 动画 + 弱定量表（对 IVD 阈值的 F1/IoU、涡面积占比、帧间连续性）+ 复现 README
 4. 多阈值敏感性报告（τ 的稳健性说明）
 
@@ -132,7 +137,7 @@ cylinder_vortex_pipeline/
 - **阶段 4 Kaggle 上传**：Dataset A = nc 文件；Dataset B = 整个 pipeline 目录。
   判据：Notebook 里 `pip install h5py PyYAML matplotlib tqdm` 后能 import vendor 并加载数据。
 - **阶段 5 训练**：先 1 epoch 冒烟实测每步耗时 → 校准 epoch 样本数（T4 单卡预计 0.8~1.3s/步 → 80k 步约 18~29h，超预算则用 DataParallel/AMP/降样本数）；**Kaggle 会话硬上限 12h** → 分块 ≤8h，每 epoch checkpoint，块尾打包为 Kaggle Dataset 新版本，下次会话恢复。
-  判据：200 epoch 完成，val F1 记录，checkpoint 归档。（代码机制已在票 07 交付——kaggle/ Notebook 自动基准/预算检查/分块/续训/块尾发布 + `--report-f1` val F1 记录；**200 epoch 实跑与实测值回填为用户 Kaggle 执行项**，见票 07 完成记录与 `kaggle/README.md`。）
+  判据：200 epoch 完成，val F1 记录，checkpoint 归档。（代码机制已在票 07 交付——kaggle/ Notebook 自动基准/预算检查/分块/续训/块尾发布 + `--report-f1` val F1 记录；**200 epoch 实跑与实测值回填为用户 Kaggle 执行项**，见票 07 完成记录与 `kaggle/README.md`。**2026-08-29 多数据集线结算口径改 130 epoch**（86 续跑 44；loss 趋稳观察）——阶段 5 判据在多数据集线上以 130 + `{run}_test_f1.json` 为准。）
 - **阶段 6 推理评估**：TTA 滑窗推理 → 投影 → 对比图+动画+弱定量表。
   判据：满足 §3 验收标准 1、3、4。
 - **阶段 7 整理**：结果目录、复现 README、参数表、checkpoint 归档。
@@ -150,7 +155,7 @@ cylinder_vortex_pipeline/
 | 最小涡面积 | 5×5 | 连通域过滤（票 07 延伸实测：过滤删的是 <9 格小碎片而非大涡结构，p85 下 ma9 与 ma25 覆盖差仅 0.15%，保留） |
 | epoch 样本数 | **20000**（50% 正样本） | 2026-08-25 票 07 步速校准回写：T4×2 实测 ~5s/步（DP+全精度）→ 40000×200 epoch≈110h 超预算 4×；降半 + TF32 → 预计 35~55h；下限 20000 不变 |
 | 时间划分 | abs：10 / 12.5 / 15 s（**仅 1501 帧×dt=0.01 适用**）；**多数据集 frac：各数据集帧前 60% 训 / 后 40% 测（无 val，逐数据集各自）** | train/val/test 无时间泄漏（守护测试）；frac 口径（fraction_slices）对帧数/时长各异的数据集通用（§2 盘点——jung t 从 1.107 起，绝对秒数不通用） |
-| 多数据集池 | roots = 7 个 `outputs/datasets/<名>/dataset`（config/pathline_transformer_multi.yaml） | τ 与归一化逐数据集各自（各 meta ivd μ/σ、speed_max）；50% 过采样、t_scale 0.25 等与单数据集同参；留出评估 `--report-f1 --f1-split test` |
+| 多数据集池 | roots = **6 个** `outputs/datasets/<名>/dataset`（config/pathline_transformer_multi.yaml；**2026-08-29 duffing 移出**，原 7） | τ 与归一化逐数据集各自（各 meta ivd μ/σ、speed_max）；50% 过采样、t_scale 0.25 等与单数据集同参；留出评估 `--report-f1 --f1-split test`；**结算口径 130 epoch**（2026-08-29 用户决策，原 200） |
 | TTA 次数 | 5 | 平均随机 PSL 采样的概率 |
 
 ## 7. 风险与预案
@@ -245,4 +250,6 @@ AMP（独立小票，改迁移忠实性）——目标 <20h 需 A100 级硬件�
 - 2026-08-25 票 07 延伸 **实测回填一（多数据集步速，运行中）**：修复四期后用户重跑 —— cell 5 校准 1 epoch ≈ **10.85 min**；训练（cell 6 分块，43 epoch/块）实测 **每 epoch 10.0-10.3 min ≈ 3.0-3.1 s/步**（epoch 1 1260.2s / epoch 2 1876.9s / epoch 3 2487.8s / epoch 4 3087.6s，连续差分 617/611/600s），loss 正常下降（0.2685 → 0.1867 → 0.1741 → 0.1618）。**对比单数据集基线 5.3 s/步 / 17.6 min/epoch → 快 ~40%**（200 epoch ≈ 33.7h ≈ 5 会话 vs 基线 59h/8 会话）。**机制（已本地定量验证）**：提取成本主项 = _interp_pair（O(迹线点数)，与网格无关，duffing 0.166ms/次 vs pipedcylinder 0.179ms/次 +8%）；pipedcylinder 独有 ① 复杂固体几何（41.8% 固体 + 双圆柱/壁面 → 重播种/短迹线重试，实测 median 53ms vs 其余 39-43ms，约 +35%）② 页故障尖峰（1.2GB memmap 工作集，max 609-939ms vs duffing 100MB 无尖峰）——基线 100% 采样 pipedcylinder，数据管线停滞 ~2.3s/步；多数据集池 pipedcylinder 占 1/7 → 去抖。**修正此前判断**：多数据集"变快"为真（非 tqdm EMA 假象），速度收益幅度高于先前保守估计（3.0 vs 预估 4-4.5 s/步）。未决：无。下一步：训练继续（5 会话）→ 块尾打包续训 → 完成后 `--report-f1 --f1-split test` 回填。
 - 2026-08-25 票 07 延伸 运行反馈修复五期（cell 7 块尾打包路径硬编码——43 epoch 全成但包没打上）：首块 43 epoch 全部训练成功（loss 至 0.0873，latest 在 outputs/train_multi/），但 cell 7 块尾打包报 `FileNotFoundError: No such file or directory: 'outputs/train/bench_info.json'`——**根因**：多数据集配置 `ckpt_dir=outputs/train_multi`，而 notebook cells 3/5/6/7/8/9 **硬编码 `outputs/train`**（单数据集时代路径）：cell 7 复制 bench_info 到不存在的目录（os.makedirs 仅在 cell 3 的 ckpt 还原分支——首会话无 ckpt 从未创建过）；**连带隐患（数据丢失级）**：下会话 cell 3 还原 checkpoint 到 outputs/train/ 而训练读 outputs/train_multi/ → 漏修则续训从 0 开始。**修复**：notebook 统一引入 `CKPT_DIR = cfg0["train"]["ckpt_dir"]`（单=outputs/train；多=outputs/train_multi）——cell 3（还原目标+makedirs）、cell 5（BENCH_RESTORED）、cell 6（latest 路径）、cell 7（bench_info 复制目标[复制前 makedirs]+srcdir+模式 A 发布目录）、cell 8（F1 glob）、cell 9（预览 ckpt 路径）全部去硬编码（无残留引用）。**用户恢复路径（43 epoch 无损）**：① 失败会话文件浏览器下载 `repo/outputs/train_multi/pathline_transformer_multi_ckpt_latest.pth`（+`outputs/bench_info.json`）；② git push 本修复；③ 新建 Kaggle Dataset（放这两个文件，如 `vortex-train-ckpt-multi`）挂 input（模式 B：CKPT_DATASET_SLUG 留空）；④ 下会话 Run All → cell 3 还原（落 outputs/train_multi ✓）→ cell 6 `--resume auto` 从 43 续训（每块 43 epoch，200 epoch 共 5 块）。未决：无。下一步：用户执行 ①-④ → 续训 → 块尾打包（修复后 cell 7 应成功）→ 完成回填。
 - 2026-08-29 票 07 延伸 运行反馈修复九期（cell 6 基准读取硬编码——跨会话复用路径崩溃，八期功能首个真实落地缺口）：用户按五期恢复路径 ①-④ 执行，日志 cell 1-5 全通（repo HEAD 534c72a、7 数据集链接、checkpoint 还原 outputs/train_multi/、**复用步速基准（outputs/train_multi/bench_info.json）: 1 epoch = 627.8 s**（2026-08-28 15:31 首块实测）、34.9h 预算内、计划 [43,43,43,43,28]）后 cell 6 崩 `FileNotFoundError: 'outputs/bench_info.json'`——**根因**：cell 5 的 `pick_bench_source` 走「还原值复用」分支时**不写** `outputs/bench_info.json`（该文件只在「本会话实测」分支写入），而 cell 6 开头硬编码 `json.load(open("outputs/bench_info.json"))`——读的是本会话实测路径而非还原值路径；首会话（无还原值、实测写入）能过，跨会话复用是八期引入功能后的首次真实执行，此缺口首次暴露（与五期同类：cell 间隐藏路径耦合，表现不同）。**修复**：cell 5 无论来源**恒写** `outputs/bench_info.json`（= 本会话生效基准；还原值仅来源）→ cell 6/7 读取入口语义不变、cell 7 打包闭环成立；本地模拟验证（pick_bench_source 命中还原值 → 恒写 → cell 6 同款读取一致 → cell 7 存在性断言成立）+ notebook JSON 合法性校验通过（10 cells）。**用户恢复路径**：git push → 重传 notebook（或粘贴新 cell 5）→ 重启会话 Run All → cell 5 应打印「复用步速基准（outputs/train_multi/bench_info.json）」、cell 6 应打印「[分块] 从 epoch 43 续到 86（本块 43；完整计划 [43,43,43,28]）」。未决：无。下一步：续训（5 会话 ~34h）→ 完成回填。
+- 2026-08-29 第二块完成（43→86，实测回填二）+ **两项用户决策（结算 130 + duffing 移除）**：第二块日志核对——repo HEAD 132243c（九期修复生效）、cell 1-5 全通（还原/自检/复用基准 627.8s/预算内/计划 [43,43,43,43,28]）、`[分块] 从 epoch 43 续到 86`；训练 44-86 loss 0.0859→0.0811（**无回退**，43 终点 0.0873 无缝衔接）、lr 61 号起换挡 5e-6（TwoStep 语义正确）；**cell 7 打包成功**（bench_info 已随打包 + ckpt_snapshot.zip 10.3MB——五期+九期修复双双生效）；cell 9 预览 t1300（**数据集索引 0 = boussinesq**——cell 9 默认 --dataset 0，非 pipedcylinder；boussinesq 域 x[-0.5,0.5] y[-0.5,2.5]，帧 1300 ∈ test 片 ✓ 生效）：概率域 [0,1]、正格 14766（21.9%）、三联图目检高概率区与 IVD/弱标签涡结构对应良好（无结构错位、边界毛糙+轻微过分割=中途模型+投影纹理预期，管线正确性确认）。**用户决策 1（结算标准变更）**：43-86 loss 已趋稳 → **200→130 epoch 结算**（86 续跑 44，config epochs 130——§1 决策 3/§3 验收 2/§5 阶段 5/§6/本节回写）；最终块自动带 `--report-f1 --f1-split test` → `pathline_transformer_multi_test_f1.json`（130 epoch 结算值）。**用户决策 2（数据质量问题）**：**forceddampedduffing2d 移出训练池**（roots 7→6；§2 盘点表保留该行作记录 + 注记；config root 即训练池唯一来源——**Kaggle Dataset A 无需重传**，cell 3 多链接的目录不参与池构建；本地打包目录可留可删）。**块规划预告**：epochs=130 后 cell 5 打印总时长 ≈ 22.7h（预算内）、分块计划 [43,43,44]（3 会话）；剩余 44 epoch（86→130）→ cell 6 自动 [43,1]：下一会话 86→129（43 epoch）、再下一 129→130（1 epoch + --report-f1 自动追加）。**未决**：① duffing 的具体问题原因（用户判定未披露，§2 注记占位——如涉预处理 bug 请告知以便排查）；② 130 epoch 完成后回填（test F1/IoU/checkpoint 位置）→ 票 07 勾选 + 票 08 启动（正式评估；cavity2d 已作为第 8 个"严格零样本"测试集预检通过——单帧 t=3 三联图 `outputs/preview/cavity2d_t3.png`：概率域 [0,0.997]、正格 346/3.5%（保守）、高概率区正确落在主涡+顶盖/右壁剪切层（与 IVD 对应、无结构错位），管线对新数据集（等距/无固体/21 帧非定常）适配路径 = abs 全帧单片 + t_win=16，属用户故事 9 落地演示）。下一步：用户 git push → 下一会话续训（86→129）→ 130 结算回填 → 票 08。
+
 

@@ -94,7 +94,7 @@ Kaggle Notebook 通过 `git clone https://github.com/ziyixu317-wq/2d-vortex-extr
 
 ### 6.2 回填
 
-200 epoch 完成后（cell 6 输出 `progress()==200`，cell 8 打出 val F1 json）：
+**结算口径（2026-08-29 用户决策）**：多数据集线 = **130 epoch**（progress()==130，`pathline_transformer_multi_test_f1.json`）；单数据集线（暂缓）= 200。完成后（cell 6 输出 `progress()==N`，cell 8 打出 F1 json）：
 
 1. 下载 `final_ckpt.zip` → 本机 `outputs/archive/`（gitignore，勿提交）；
 2. 从 `val_f1.json` 与 `bench_info.json` 回填：
@@ -105,7 +105,7 @@ Kaggle Notebook 通过 `git clone https://github.com/ziyixu317-wq/2d-vortex-extr
 
 ## 7. 多数据集联合训练（票 07 延伸）
 
-本地已交付：7 数据集逐数据集预处理（`outputs/datasets/<名>/{geometry,dataset,previews}` + `multi_meta.json`，≈3.8GB）、`config/pathline_transformer_multi.yaml`（data.root 列表、frac 60/40、val_split none）。**Notebook 已自动适配**（`train_kaggle.ipynb` cell 3：单/多数据集布局自动探测 → 自动选 config + 逐目录链接 `outputs/datasets/<名>/`，cells 6/8/9 的 run_name 已参数化）——**重新上传 notebook 一次即可**，之后单/多两条线都不用改 cell。Kaggle 侧执行：
+本地已交付：7 数据集逐数据集预处理（`outputs/datasets/<名>/{geometry,dataset,previews}` + `multi_meta.json`，≈3.8GB）、`config/pathline_transformer_multi.yaml`（data.root 列表、frac 60/40、val_split none）。**2026-08-29 两处口径变更**：① **结算 130 epoch**（原 200；config `train.epochs=130`）；② **forceddampedduffing2d 移出训练池**（roots 7→6；用户判定该数据集有问题）——**Kaggle Dataset A 无需重传**（config root 即训练池唯一来源，cell 3 多链接的目录不参与池构建，本地打包目录可留可删）。**Notebook 已自动适配**（`train_kaggle.ipynb` cell 3：单/多数据集布局自动探测 → 自动选 config + 逐目录链接 `outputs/datasets/<名>/`，cells 6/8/9 的 run_name 已参数化）——**重新上传 notebook 一次即可**，之后单/多两条线都不用改 cell。Kaggle 侧执行：
 
 ```powershell
 # 0. 本地打包 Dataset A（多对：nc 与数据集目录一一对应，布局 data/<nc> + datasets/<名>/）

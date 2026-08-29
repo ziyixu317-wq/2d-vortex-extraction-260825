@@ -12,8 +12,8 @@
 
 - [ ] Notebook 环境 import vendor + 数据加载通过（**交付**：self_check.py 已本地真实验证——生产模型前向 (1,256) 域 (0,1)、4 样本 (16,256,7) 有限无 NaN；**执行**：用户首会话 cell 4，失败 raise）
 - [ ] 1 epoch 实测步速，epoch 样本数校准后回写参数表（**交付**：notebook 块 5 自动基准+总时长预算检查+超预算自动生成 train_opt.yaml（AMP/DataParallel/降样本至下限 20000）+回填提示；**执行**：用户 Kaggle 实测，回写 HANDOFF §6）
-- [ ] 200 epoch 训练完成（分块 + 断点续训达成，12h 会话内无丢失）（**交付**：chunking.plan_chunks ≤7.5h/块 + `--resume auto` + 块尾打包/发布 + 基准复用；**执行**：用户 3–4 个会话）
-- [ ] 最终 checkpoint 归档（含 optimizer 状态），val F1 记录（**交付**：收尾 cell 打包 final_ckpt.zip + `--report-f1` 写 val_f1.json（自然分布，含 tp/fp/fn/tn）；**执行**：用户下载归档与回填值）
+- [ ] 200 epoch 训练完成（分块 + 断点续训达成，12h 会话内无丢失）（**交付**：chunking.plan_chunks ≤7.5h/块 + `--resume auto` + 块尾打包/发布 + 基准复用；**执行**：用户 3–4 个会话。**2026-08-29 多数据集线结算口径改 130 epoch**——用户决策（43-86 loss 趋稳），config `train.epochs=130`，原 200 中止；单数据集线仍 200）
+- [ ] 最终 checkpoint 归档（含 optimizer 状态），val F1 记录（**交付**：收尾 cell 打包 final_ckpt.zip + `--report-f1` 写 val_f1.json（自然分布，含 tp/fp/fn/tn）；**执行**：用户下载归档与回填值。**多数据集线**：最后一块（→130）自动带 `--report-f1 --f1-split test` → `outputs/train_multi/pathline_transformer_multi_test_f1.json`）
 
 ## 完成记录（2026-08-25，agent 侧交付完成）
 
@@ -58,4 +58,12 @@
 **用户执行（延伸部分）**：① git push（本延伸 commit + notebook 更新 commit）；② 重新上传 **notebook 一次**（cell 3 已自动适配单/多布局，cells 6/8/9 run_name 参数化——两条线共用）；③ 重新打包上传 Dataset A（单数据集 p85 标签 staging 已本地重建；多数据集打包命令见 README §7，磁盘不足加 `--skip-nc`）；④ Kaggle 两条训练线任选或都跑：单数据集重训（p85 标签，从零——勿挂旧 p95 ckpt 数据集，`--config config/pathline_transformer_cylinder.yaml`）与多数据集联合训练（`--config config/pathline_transformer_multi.yaml --report-f1 --f1-split test`）；⑤ 回填 HANDOFF §6 实测值与 §11。
 
 **执行边界**：新 τ 标签重训与多数据集 200 epoch 训练/留出评估级记录 = 用户 Kaggle 执行（本会话交付代码/产物/文档与本地 CPU 验证）；正式弱定量表（网格投影级、多帧/动画）属票 08。
+
+## 延伸段运行反馈（2026-08-29，实测回填与两项用户决策）
+
+- **实测进度**：首块 43 epoch（loss 0.2685→0.0873，3.0-3.1 s/步 ≈ 10.2 min/epoch，HANDOFF §11 实测回填一）；第二块 43→86 完成（loss 0.0859→0.0811，无回退；cell 7 打包修复后成功：ckpt_snapshot.zip 10.3MB）。
+- **运行反馈修复**：① 嵌套挂载探测（mount_probe，多级 rglob）；② cell 2 强制重克隆；③ cell 4 自检数据根布局自适应；④ 批式积分域边缘越界（非整跨度网格，test_edge_fringe）；⑤ cell 7 打包路径 CKPT_DIR 化；⑥~⑨ 详见 HANDOFF §11（八期 bench 复用；**九期：cell 5 恒写 bench_info.json——跨会话复用路径下 cell 6 崩溃的落地缺口**）。
+- **用户决策 1（结算标准）**：200→**130 epoch**（43-86 loss 已趋稳；config `train.epochs=130`，86 续跑 44；最后一块自动 `--report-f1 --f1-split test`）。
+- **用户决策 2（数据质量）**：**forceddampedduffing2d 移出训练池**（roots 7→6；用户判定该数据集有问题——具体原因待披露，HANDOFF §2 注记；Kaggle Dataset A 无需重传）。
+- 待回填（130 完成后）：`pathline_transformer_multi_test_f1.json`（F1/IoU/tp/fp/fn/n）、checkpoint 位置、分块会话数 → 勾选上方验收项 + HANDOFF §2/§5/§6/§11。
 
