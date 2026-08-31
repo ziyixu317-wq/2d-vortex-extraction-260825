@@ -188,12 +188,13 @@ class TestMultiTrainIntegration:
                   "--report-f1", "--f1-split", "nope"])
 
     def test_multi_config_yaml_shape(self, tmp_path):
-        """生产多数据集配置（config/pathline_transformer_multi.yaml）：7 roots、
+        """生产多数据集配置（config/pathline_transformer_multi.yaml）：6 roots
+        （forceddampedduffing2d 已移出训练池——HANDOFF §1 决策/§11）、
         frac 口径（val_split none）、run_name 独立（与单数据集训练不混写）。"""
         import yaml
         cfg = yaml.safe_load(open("config/pathline_transformer_multi.yaml",
                                   encoding="utf-8"))
-        assert len(cfg["data"]["root"]) == 7
+        assert len(cfg["data"]["root"]) == 6
         assert all("outputs/datasets/" in r for r in cfg["data"]["root"])
         assert cfg["data"]["val_split"] == "none"
         assert cfg["train"]["run_name"] == "pathline_transformer_multi"
