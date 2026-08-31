@@ -4,16 +4,16 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-human
+**Status:** done（2026-08-29 多数据集线 130 epoch 结算完成；单数据集线暂缓）
 
 **交付物 vs 执行边界**（agent 交付完成 → 用户 Kaggle 执行 → 回填后勾选并改 done）：
 - 交付：`kaggle/` 全部（Notebook/打包/分块/自检/手册）、`train_kaggle.py --report-f1`、`dataset.set_epoch_natural`、`tests/test_kaggle.py`（20 项，全量 151 passed）
 - 用户执行：Kaggle 端 `Run All`（首会话自检 → 步速实测 → 分块训练）；`kaggle/README.md` §0-6 逐步指引与回填清单
 
-- [ ] Notebook 环境 import vendor + 数据加载通过（**交付**：self_check.py 已本地真实验证——生产模型前向 (1,256) 域 (0,1)、4 样本 (16,256,7) 有限无 NaN；**执行**：用户首会话 cell 4，失败 raise）
-- [ ] 1 epoch 实测步速，epoch 样本数校准后回写参数表（**交付**：notebook 块 5 自动基准+总时长预算检查+超预算自动生成 train_opt.yaml（AMP/DataParallel/降样本至下限 20000）+回填提示；**执行**：用户 Kaggle 实测，回写 HANDOFF §6）
-- [ ] 200 epoch 训练完成（分块 + 断点续训达成，12h 会话内无丢失）（**交付**：chunking.plan_chunks ≤7.5h/块 + `--resume auto` + 块尾打包/发布 + 基准复用；**执行**：用户 3–4 个会话。**2026-08-29 多数据集线结算口径改 130 epoch**——用户决策（43-86 loss 趋稳），config `train.epochs=130`，原 200 中止；单数据集线仍 200）
-- [ ] 最终 checkpoint 归档（含 optimizer 状态），val F1 记录（**交付**：收尾 cell 打包 final_ckpt.zip + `--report-f1` 写 val_f1.json（自然分布，含 tp/fp/fn/tn）；**执行**：用户下载归档与回填值。**多数据集线**：最后一块（→130）自动带 `--report-f1 --f1-split test` → `outputs/train_multi/pathline_transformer_multi_test_f1.json`）
+- [x] Notebook 环境 import vendor + 数据加载通过（**交付**：self_check.py 已本地真实验证——生产模型前向 (1,256) 域 (0,1)、4 样本 (16,256,7) 有限无 NaN；**执行**：用户首会话 cell 4，失败 raise）
+- [x] 1 epoch 实测步速，epoch 样本数校准后回写参数表（**交付**：notebook 块 5 自动基准+总时长预算检查+超预算自动生成 train_opt.yaml（AMP/DataParallel/降样本至下限 20000）+回填提示；**执行**：用户 Kaggle 实测 627.8 s/epoch（3.0 s/步），回写 HANDOFF §6）
+- [x] 130 epoch 训练完成（分块 + 断点续训达成，12h 会话内无丢失）（**交付**：chunking.plan_chunks ≤7.5h/块 + `--resume auto` + 块尾打包/发布 + 基准复用；**执行**：用户 4 个会话——0→43、43→86、86→129、129→130+结算；2026-08-29 用户决策 200→130 结算口径）
+- [x] 最终 checkpoint 归档（含 optimizer 状态），test P/R/F1 记录（**交付**：收尾 cell 打包 final_ckpt.zip + `--report-f1 --f1-split test` 写 test_f1.json（自然分布，含 tp/fp/fn/tn/precision/recall/f1/iou）；**执行**：用户下载归档——`pathline_transformer_multi_ckpt_latest.pth` epoch=129（5.6MB）+ `pathline_transformer_multi_test_f1.json`：**P=0.4967 R=0.9549 F1=0.6535** IoU=0.4853 n=5,120,000）
 
 ## 完成记录（2026-08-25，agent 侧交付完成）
 
@@ -63,7 +63,7 @@
 
 - **实测进度**：首块 43 epoch（loss 0.2685→0.0873，3.0-3.1 s/步 ≈ 10.2 min/epoch，HANDOFF §11 实测回填一）；第二块 43→86 完成（loss 0.0859→0.0811，无回退；cell 7 打包修复后成功：ckpt_snapshot.zip 10.3MB）。
 - **运行反馈修复**：① 嵌套挂载探测（mount_probe，多级 rglob）；② cell 2 强制重克隆；③ cell 4 自检数据根布局自适应；④ 批式积分域边缘越界（非整跨度网格，test_edge_fringe）；⑤ cell 7 打包路径 CKPT_DIR 化；⑥~⑨ 详见 HANDOFF §11（八期 bench 复用；**九期：cell 5 恒写 bench_info.json——跨会话复用路径下 cell 6 崩溃的落地缺口**）。
-- **用户决策 1（结算标准）**：200→**130 epoch**（43-86 loss 已趋稳；config `train.epochs=130`，86 续跑 44；最后一块自动 `--report-f1 --f1-split test`）。
+- **用户决策 1（结算标准 + 结算指标）**：200→**130 epoch**（43-86 loss 已趋稳；config `train.epochs=130`，86 续跑 44；最后一块自动 `--report-f1 --f1-split test`）；**结算指标 = test 片自然分布 Precision/Recall/F1**（阈值 0.5、IoU 附带记录，用户 2026-08-29 定）。
 - **用户决策 2（数据质量）**：**forceddampedduffing2d 移出训练池**（roots 7→6；**问题实证 2026-08-29**：文件无结构缺陷——netCDF4/h5py 读写正常、与参考数据集逐字段同构；ParaView 打开显示 1×1×1 退化网格 + `vtkPVImageSliceMapper: Incorrect dimensionality` = ParaView reader 路径问题（被当 Image 而非 rectilinear grid，非数据内容错误）；用户保持移出：常规复核工具不可用→可信度受损，且该数据集贡献最小（正格 8.3% 最低）；详见 HANDOFF §2 注记。Kaggle Dataset A 无需重传）。
-- 待回填（130 完成后）：`pathline_transformer_multi_test_f1.json`（F1/IoU/tp/fp/fn/n）、checkpoint 位置、分块会话数 → 勾选上方验收项 + HANDOFF §2/§5/§6/§11。
+- **已回填（2026-08-29，130 epoch 结算完成）**：`pathline_transformer_multi_test_f1.json` = **P=0.4967 / R=0.9549 / F1=0.6535**（IoU=0.4853；tp 844,308 / fp 855,629 / fn 39,855 / tn 3,380,208 / n=5,120,000；6 数据集联合 test 片自然分布、阈值 0.5）；checkpoint = `pathline_transformer_multi_ckpt_latest.pth` epoch=129（5.6MB，含 optimizer 状态）；步速 627.8 s/epoch（首块实测、跨会话复用）；train_loss 86→129 = 0.0811→0.0797（缓降）；分块会话数 = 4（0→43、43→86、86→129、129→130+结算）。**结算值解读**：P<0.5+R≈0.95 联合过分割——主因 boussinesq τ 跨片漂移（train 0.0555 vs test 0.5955，~10×）；86 epoch 逐数据集 100 样本评估印证（boussinesq P=0.305、cylinder2d P=0.572；其余 4 数据集 F1 0.88-0.96）。**缺口**：87-129 会话产物（E90/E120 里程碑 + 训练日志）未下载（latest=最终权重已拿到，里程碑非必需）。验收项 2/3/4 已勾选 → 票 Status = done。→ 票 08 正式评估（latest 权重在 `outputs/_ckpt130/`；cavity2d 作第 8 个严格零样本测试集；boussinesq τ 漂移在票 08 按数据集拆分声明或全局 τ 重标——用户决策）。
 
