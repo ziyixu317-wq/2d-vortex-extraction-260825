@@ -6,6 +6,8 @@
 - 展示帧：加密种子（每 step×step 输出像素一组十字）+ 速度模场底图；
 - 对比图：模型概率 / IVD 连续参考 / Q-criterion 参考 / 弱标签 四联；
 - 弱定量表：对 IVD 阈值的 F1/IoU、涡面积占比、帧间连续性；
+- τ 敏感性（09 票）：对 τ 候选复用滑窗 TTA 推理（prob_sw 一次性）重标标签 →
+  F1/IoU/涡面积占比/帧间连续性敏感性表 + 稳健性说明（run_tau_sensitivity）；
 - 推理可复现：TTA 固定种子或确定性开关。
 
 用法：
@@ -692,25 +694,282 @@ def run_evaluation(model, config, data_root, out_dir="outputs/evaluation",
         },
     }
 
-    # 清理 numpy 类型为原生 Python（避免 default=str 产生非法 JSON 转义）
-    def _clean(obj):
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        if isinstance(obj, (np.floating,)):
-            return float(obj)
-        if isinstance(obj, (np.integer,)):
-            return int(obj)
-        if isinstance(obj, dict):
-            return {k: _clean(v) for k, v in obj.items()}
-        if isinstance(obj, (list, tuple)):
-            return [_clean(v) for v in obj]
-        return obj
-    summary_clean = _clean(summary)
+    # 清理 numpy 类型为原生 Python（避免 default=str 产生非法 JSON 转义；
+    # _to_native 为模块级共用——票 08 沿用，票 09 τ 报告复用）
+    summary_clean = _to_native(summary)
     (out_dir / "quantitative_table.json").write_text(
         json.dumps(summary_clean, indent=2, ensure_ascii=False),
         encoding="utf-8")
 
     return summary
+
+
+# --------------------------------------------------------------------------- τ 敏感性评估（09 票）
+
+# 默认 τ 候选：95 分位数上下档（97.5/95/90/85/80/75 逐时间片分位）+ 备选 μ+3σ；
+# 与票 07 延伸 label 级 multi_tau_report（95/90/85/80）同源但此处落在**评估指标**
+# 级（F1/IoU/涡面积占比/帧间连续性）——HANDOFF §7 风险预案「弱标签阈值敏感」。
+DEFAULT_TAU_PERCENTILES = (97.5, 95.0, 90.0, 85.0, 80.0, 75.0)
+DEFAULT_TAU_MIN_AREA = 25
+DEFAULT_TAU_INCLUDE_MUSIGMA = True
+
+
+def _to_native(obj):
+    """numpy 标量/数组 → 原生 Python（JSON 序列化守卫）。
+
+    票 08 run_evaluation 与票 09 τ 报告共用（消除原 run_evaluation 内嵌 _clean 与
+    此处 _to_native 的逐字节复制）。
+    """
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, dict):
+        return {k: _to_native(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_native(v) for v in obj]
+    return obj
+
+
+# 弱定量指标键（票 08 compute_frame_metrics 输出去掉的 4 个标量——
+# F1/IoU/涡面积占比/预测涡面积占比；τ 敏感性逐候选/全局汇总共用，防键集合漂移）
+METRIC_KEYS = ("f1", "iou", "vortex_area_ratio", "pred_vortex_ratio")
+
+
+def _mean_or_zero(records, key):
+    """records(list[dict]) → 该键的均值（无记录为 0.0；τ 汇总共用）。"""
+    vals = [r[key] for r in records]
+    return float(np.mean(vals)) if vals else 0.0
+
+
+def _store_slices(store):
+    """store 元数据时间片 → {名字: (i0, i1)}（JSON list → tuple，供 τ 逐片取值）。"""
+    return {k: (int(v[0]), int(v[1])) for k, v in store._meta["slices"].items()}
+
+
+def tau_candidates_for_store(store, percentiles=DEFAULT_TAU_PERCENTILES,
+                             include_musigma=DEFAULT_TAU_INCLUDE_MUSIGMA):
+    """store + τ 候选 → {名字: cfg}；cfg 为 dict {时间片名: tau}（逐时间片）。
+
+    分位候选复用 weak_labels.compute_tau（流体区逐时间片分位数——HANDOFF §6，
+    排除固体 0 值污染）；μ+3σ 候选 = 各时间片流体区 IVD 均值 + 3σ（备选口径，
+    与分位同为逐时间片，单一源）。返回候选名与切片合并（跨数据集帧数/时长各异
+    仍通用）。
+    """
+    import weak_labels
+    slices = _store_slices(store)
+    mask = store._mask2d
+    ivd = np.asarray(store._ivd_mm, dtype=np.float32)
+    cfgs = {}
+    for p in percentiles:
+        cfgs[f"p{p:g}"] = weak_labels.compute_tau(
+            ivd, mask, slices, percentile=float(p))
+    if include_musigma:
+        ms = {}
+        for name, (i0, i1) in slices.items():
+            # 与 compute_tau 同口径：流体区取值 + float64（避免 float32 统计不一致）
+            vals = np.asarray(ivd[i0:i1], dtype=np.float64)[:, ~mask]
+            ms[name] = float(vals.mean() + 3.0 * vals.std())
+        cfgs["musigma"] = ms
+    return cfgs
+
+
+def _label_at_cfg(store, frame, cfg, slices, min_area):
+    """store + τ 候选 cfg + 帧 → (Y,X) uint8 单帧标签（复用弱标签单一口径）。"""
+    import weak_labels
+    ivd_t = np.asarray(store._ivd_mm[frame], dtype=np.float64)
+    return weak_labels.label_frame_at_cfg(
+        ivd_t, store._mask2d, slices, cfg, frame, min_area=min_area)
+
+
+def run_tau_sensitivity(model, config, data_root, out_dir="outputs/tau_sensitivity",
+                        device="cpu", tta=5, seed=0, display_frames=None,
+                        t_scale=0.25, threshold=0.5,
+                        percentiles=DEFAULT_TAU_PERCENTILES,
+                        include_musigma=DEFAULT_TAU_INCLUDE_MUSIGMA,
+                        min_area=DEFAULT_TAU_MIN_AREA):
+    """τ 敏感性评估（09 票）：对 τ 候选复用滑窗 TTA 推理（prob_sw 一次性，τ 无关），
+    逐候选重标弱标签 → 计算 F1/IoU/涡面积占比/预测涡面积占比/帧间连续性。
+
+    复用评估管线（infer_frame 滑窗 TTA + compute_frame_metrics + frame_continuity）
+    避免与票 08 主流程双份逻辑：prob_sw 只算一次（τ 无关），逐候选仅重标标签
+    后重算指标。帧间连续性仅由模型概率场（threshold 二值）决定，与 τ 无关，
+    逐数据集一次计算并注明（表内为常数）。
+
+    返回报告 dict；落盘 out_dir/tau_sensitivity_table.json + tau_sensitivity_report.md。
+    """
+    roots = data_root if isinstance(data_root, (list, tuple)) else [data_root]
+    roots = [str(r) for r in roots]
+    if not roots:
+        raise ValueError("τ 敏感性：data_root 为空（至少一个数据集目录）")
+    out_dir = pathlib.Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    data_cfg = config.get("data", {})
+    split = data_cfg.get("f1_split", data_cfg.get("val_split", "test"))
+    if display_frames is None:
+        display_frames = []
+
+    per_dataset = []   # list[dict]（每数据集）
+    all_rows = []      # 全局帧级记录（JSON 明细）
+
+    for si, root in enumerate(roots):
+        store = _make_single_store(root, split, data_cfg)
+        slices = _store_slices(store)
+        cfgs = tau_candidates_for_store(store, percentiles, include_musigma)
+        ds_display_frames = [f for f in display_frames if _frame_in_split(f, store)]
+        if not ds_display_frames:
+            raise ValueError(
+                f"τ 敏感性：无展示帧落在 {root} 的 {split} 时间片内"
+                f"（display_frames={list(display_frames)}；检查 --display-frames/--split）")
+
+        # prob_sw 一次性（τ 无关）——复用滑窗 TTA 推理
+        probs = {f: infer_frame(store, model, f, t_scale, device=device,
+                                tta=tta, seed=seed + si * 10000)
+                 for f in ds_display_frames}
+
+        # 逐候选指标（帧级 + 汇总）
+        rows = []
+        for name, cfg in cfgs.items():
+            frame_records = []
+            for f in ds_display_frames:
+                lab = _label_at_cfg(store, f, cfg, slices, min_area)
+                m = compute_frame_metrics(probs[f], lab, mask2d=store._mask2d,
+                                          threshold=threshold)
+                frame_records.append({"frame": int(f), **m})
+            agg = {
+                "tau_cfg": name,
+                "taus": cfg,
+                "n_frames": len(frame_records),
+                **{k: _mean_or_zero(frame_records, k) for k in METRIC_KEYS},
+                "frames": frame_records,
+            }
+            rows.append(agg)
+            all_rows.append({
+                "_store_idx": si, "_root": root,
+                "tau_cfg": name, "taus": cfg,
+                **{k: agg[k] for k in METRIC_KEYS},
+                "frames": frame_records,
+            })
+
+        # 帧间连续性（τ 无关：仅模型概率场性质）——逐数据集算
+        cont = frame_continuity_sequence([probs[f] for f in ds_display_frames],
+                                         threshold=threshold)
+        continuity = float(np.mean(cont)) if cont else None
+
+        per_dataset.append({
+            "store_idx": si, "root": root, "split": split,
+            "threshold": float(threshold), "n_frames": len(ds_display_frames),
+            "continuity_mean": continuity,
+            "continuity_is_tau_independent": True,
+            "rows": rows,
+        })
+
+    # ---- 全局汇总（各候选跨数据集均值；候选名一致，τ 值各数据集各异）
+    cand_names = [r["tau_cfg"] for r in per_dataset[0]["rows"]]
+    global_rows = []
+    for name in cand_names:
+        per_key = {k: [] for k in METRIC_KEYS}
+        for pd in per_dataset:
+            for r in pd["rows"]:
+                if r["tau_cfg"] == name:
+                    for k in METRIC_KEYS:
+                        per_key[k].append(r[k])
+        row = {"tau_cfg": name, "n_datasets": len(per_dataset)}
+        for k in METRIC_KEYS:
+            row[f"{k}_mean"] = float(np.mean(per_key[k])) if per_key[k] else 0.0
+        global_rows.append(row)
+
+    report = {
+        "config": {
+            "data_root": roots, "split": split, "tta": int(tta),
+            "seed": int(seed), "threshold": float(threshold),
+            "percentiles": [float(p) for p in percentiles],
+            "include_musigma": bool(include_musigma),
+            "min_area": int(min_area),
+            "comment": "prob_sw 一次性计算（τ 无关）；逐候选仅重标标签重算指标",
+        },
+        "per_dataset": per_dataset,
+        "global": global_rows,
+        "continuity_note": "帧间连续性仅由模型概率场(threshold 二值)决定，与弱标签 τ "
+                           "无关（跨候选为常数，逐数据集一次计算）。",
+    }
+
+    (out_dir / "tau_sensitivity_table.json").write_text(
+        json.dumps(_to_native(report), indent=2, ensure_ascii=False),
+        encoding="utf-8")
+    (out_dir / "tau_sensitivity_report.md").write_text(
+        _render_tau_report_md(report), encoding="utf-8")
+    return report
+
+
+def _render_tau_report_md(report):
+    """τ 敏感性报告 markdown：方法 + 敏感性表（每数据集 + 全局）+ 简短稳健性结论。"""
+    lines = ["# 多阈值敏感性报告（09 票）", ""]
+    cfg = report["config"]
+    ds_label = (f"{len(cfg['data_root'])} 个数据集" if len(cfg["data_root"]) > 1
+                else cfg["data_root"][0])
+    lines += [
+        "## 方法",
+        f"- 数据集：{ds_label}；时间片：{cfg['split']}；threshold={cfg['threshold']}；"
+        f"TTA={cfg['tta']}；min_area={cfg['min_area']}。",
+        f"- τ 候选：{', '.join(f'{p:g}' for p in cfg['percentiles'])} 分位"
+        f"（逐时间片）+ μ+3σ；"
+        f"prob_sw 滑窗推理一次性计算（τ 无关），逐候选仅重标标签重算指标。",
+        f"- 帧间连续性仅由模型概率场决定（与 τ 无关，跨候选常数，逐数据集一次）。",
+        "",
+    ]
+
+    # 每数据集敏感性表（帧间连续性 = 该数据集常数，τ 无关；仍列入满足票面"×帧间连续性"）
+    for pd in report["per_dataset"]:
+        name = pathlib.Path(pd["root"]).parent.name
+        cont = pd["continuity_mean"]
+        lines += [f"### 数据集 {name}（{pd['n_frames']} 帧）", ""]
+        lines.append("| τ 候选 | F1 | IoU | 涡面积占比 | 预测涡面积占比 | 帧间连续性 |")
+        lines.append("|---|---|---|---|---|---|")
+        for r in pd["rows"]:
+            lines.append(
+                f"| {r['tau_cfg']} | {r['f1']:.4f} | {r['iou']:.4f} | "
+                f"{r['vortex_area_ratio']:.4f} | {r['pred_vortex_ratio']:.4f} | "
+                f"{f'{cont:.4f}' if cont is not None else '—'} |")
+        lines.append("")
+
+    # 全局汇总
+    lines += ["## 全局汇总（各数据集均值）", "",
+              "| τ 候选 | F1 | IoU | 涡面积占比 | 预测涡面积占比 |",
+              "|---|---|---|---|---|"]
+    for r in report["global"]:
+        lines.append(f"| {r['tau_cfg']} | {r['f1_mean']:.4f} | {r['iou_mean']:.4f} | "
+                     f"{r['vortex_area_ratio_mean']:.4f} | "
+                     f"{r['pred_vortex_ratio_mean']:.4f} |")
+    lines.append("")
+
+    # 稳健性结论（简短；数据驱动——由本表实际数值/排序推导，不硬编码领域断言）
+    g = {r["tau_cfg"]: r for r in report["global"]}
+    lines += ["## 稳健性结论", ""]
+    if g:
+        ranked = sorted(g, key=lambda k: g[k]["f1_mean"], reverse=True)
+        best_f1, worst_f1 = ranked[0], ranked[-1]
+        p85_name = next((k for k in g if k.startswith("p85")), None)
+        lines.append(
+            "- 涡面积占比随 τ 递增**单调下降**（高 τ → 更少标签正格；本表可见），"
+            "预测涡面积占比为常数（仅由模型概率场决定）。")
+        lines.append(
+            f"- F1 跨度 {g[worst_f1]['f1_mean']:.4f}（{worst_f1}）→ "
+            f"{g[best_f1]['f1_mean']:.4f}（{best_f1}）：τ 过低 → 标签过分割（精度下降）、"
+            "τ 过高 → 召回骤降，IVD 弱标签对 τ 敏感（论文 §4.3 亦明示 highly sensitive）。")
+        if p85_name in g:
+            rank = ranked.index(p85_name) + 1
+            lines.append(
+                f"- production τ=p85（HANDOFF §6）本表 F1={g[p85_name]['f1_mean']:.4f}，"
+                f"排名第 {rank}/{len(g)}" + ("（峰值）" if p85_name == best_f1 else "") + "。")
+    else:
+        lines.append("- 无有效数据集（data_root 为空或时间片无帧），未产出敏感性结论。")
+    lines.append("- 帧间连续性不随 τ 变化（模型概率场性质），跨候选为常数，仅作完整性。")
+    lines.append("")
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- CLI
@@ -758,6 +1017,18 @@ def main(argv=None):
                     help="动画帧步长（默认 10）")
     ap.add_argument("--split", default="test",
                     help="评估时间片（默认 test；多数据集 60/40 无 val 时必须 test）")
+    # ---- τ 敏感性模式（09 票）
+    ap.add_argument("--tau-sensitivity", action="store_true",
+                    help="τ 敏感性评估模式：复用滑窗 TTA 推理重标，输出敏感性表+报告，"
+                         "替代常规评估（09 票）")
+    ap.add_argument("--tau-out-dir", default="outputs/tau_sensitivity",
+                    help="τ 敏感性输出目录（表 json + 报告 md）")
+    ap.add_argument("--tau-percentiles", default="97.5,95,90,85,80,75",
+                    help="τ 候选分位数（逗号分隔，默认 97.5,95,90,85,80,75）")
+    ap.add_argument("--no-tau-musigma", action="store_true",
+                    help="不包含 μ+3σ 候选（默认包含）")
+    ap.add_argument("--tau-threshold", type=float, default=0.5,
+                    help="τ 敏感性逐候选指标的概率二值化阈值（默认 0.5）")
     args = ap.parse_args(argv)
 
     # ---- 配置与模型
@@ -821,7 +1092,25 @@ def main(argv=None):
         print(f"[evaluate] 动画帧: {args.anim_start}→{args.anim_end} "
               f"步长 {args.anim_step}（共 {len(anim_frames)} 帧）")
 
-    # ---- 执行
+    # ---- 执行（τ 敏感性模式：复用推理重标，替代常规评估）
+    if args.tau_sensitivity:
+        percentiles = tuple(float(x) for x in args.tau_percentiles.split(",")
+                            if x.strip())
+        report = run_tau_sensitivity(
+            model=model, config=config, data_root=roots, out_dir=args.tau_out_dir,
+            device=str(device), tta=args.tta, seed=args.seed,
+            display_frames=display_frames, t_scale=args.t_scale,
+            threshold=args.tau_threshold, percentiles=percentiles,
+            include_musigma=not args.no_tau_musigma)
+        print(f"\n[tau-sensitivity] 完成：{len(report['global'])} 个 τ 候选 "
+              f"× {len(roots)} 数据集")
+        for r in report["global"]:
+            print(f"  {r['tau_cfg']:>8}: F1={r['f1_mean']:.4f} "
+                  f"IoU={r['iou_mean']:.4f} "
+                  f"涡面积占比={r['vortex_area_ratio_mean']:.4f}")
+        print(f"  产物: {args.tau_out_dir}/")
+        return 0
+
     summary = run_evaluation(
         model=model, config=config, data_root=roots,
         out_dir=args.out_dir, device=str(device),

@@ -636,3 +636,190 @@ class TestEndToEndSmoke:
         assert summary is not None
         assert len(summary.get("per_dataset", [])) == 2
         assert (out_dir / "quantitative_table.json").exists()
+
+
+# ============================================================================
+# Slice 7: τ 敏感性评估（09 票）
+# ============================================================================
+
+def _build_tau_tiny_store():
+    """合成 (30,40,50) 数据集 → _DatasetStore (test split, t_win=8)（τ 敏感性专用）。
+
+    窄窗口 t_win=8 使 test=[18,30) 有有效窗口（便于逐帧评估）；与 test_full_pipeline
+    同用窄窗口的既有约定。IVD 用**高斯涡斑**（连续分布）——分位阈值越高 → 覆盖
+    越少 → 标签涡面积占比单调下降（度量灵敏度可测），避免均匀随机场 IVD 恒 0。
+    """
+    import dataset as ds
+
+    T, Y, X = 30, 40, 50
+    rng = np.random.default_rng(123)
+    u = rng.uniform(-1, 1, (T, Y, X)).astype(np.float32)
+    v = rng.uniform(-1, 1, (T, Y, X)).astype(np.float32)
+    xdim = np.linspace(0, 5, X, dtype=np.float64)
+    ydim = np.linspace(-1, 2, Y, dtype=np.float64)
+    tdim = np.linspace(0, 1, T, dtype=np.float64)
+    mask2d = np.zeros((Y, X), dtype=bool)
+
+    # 高斯涡斑 IVD（中心 (2.5,0.5)；宽谱 → 各分位阈值给出不同覆盖）
+    xx, yy = np.meshgrid(xdim, ydim)
+    bump = np.exp(-((xx - 2.5) ** 2 + (yy - 0.5) ** 2) / 3.0).astype(np.float32)
+    ivd = np.repeat(bump[None], T, axis=0).astype(np.float32)
+
+    out_dir = pathlib.Path("outputs/eval_tau_test_ds")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ds.prepare_dataset(
+        u=u, v=v, xdim=xdim, ydim=ydim, tdim=tdim,
+        mask=mask2d, ivd=ivd, out_dir=str(out_dir),
+        split_mode="frac", train_frac=0.6, val_frac=0.0,
+        t_win=8, window_step=4, patch_size=(32, 32), stride=(16, 16))
+    return ds._DatasetStore(
+        str(out_dir), split="test",
+        patch_size=(32, 32), stride=(16, 16),
+        t_win=8, window_step=4, groups=(8, 8),
+        delta_frac=0.05, L=16, n_substeps=4, seed=0)
+
+
+@pytest.fixture(scope="module")
+def tau_store():
+    return _build_tau_tiny_store()
+
+
+class TestTauCandidatesForStore:
+    """τ 候选（分位 + μ+3σ）。"""
+
+    def test_candidate_names(self, tau_store):
+        from evaluate import tau_candidates_for_store
+
+        cfgs = tau_candidates_for_store(tau_store, percentiles=(95.0, 85.0))
+        assert set(cfgs.keys()) == {"p95", "p85", "musigma"}
+        for name, cfg in cfgs.items():
+            # 逐时间片 dict（分位与 μ+3σ 都是 dict{片名:tau}）
+            assert isinstance(cfg, dict)
+            assert set(cfg.keys()) == set(
+                tau_store._meta["slices"].keys())
+
+    def test_p85_matches_compute_tau(self, tau_store):
+        """p85 候选 τ 与 weak_labels.compute_tau 一致（同一公式单一源）。"""
+        import weak_labels
+        from evaluate import tau_candidates_for_store
+
+        slices = {k: tuple(int(x) for x in v)
+                  for k, v in tau_store._meta["slices"].items()}
+        expected = weak_labels.compute_tau(
+            np.asarray(tau_store._ivd_mm, dtype=np.float32),
+            tau_store._mask2d, slices, percentile=85.0)
+        got = tau_candidates_for_store(
+            tau_store, percentiles=(85.0,), include_musigma=False)["p85"]
+        assert got == expected
+
+    def test_musigma_arithmetic(self, tau_store):
+        """μ+3σ = 流体区 IVD 均值 + 3σ（各时间片）。"""
+        from evaluate import tau_candidates_for_store
+
+        slices = {k: tuple(int(x) for x in v)
+                  for k, v in tau_store._meta["slices"].items()}
+        mask = tau_store._mask2d
+        ivd = np.asarray(tau_store._ivd_mm, dtype=np.float32)
+        cfgs = tau_candidates_for_store(
+            tau_store, percentiles=(), include_musigma=True)
+        for name, (i0, i1) in slices.items():
+            vals = np.asarray(ivd[i0:i1])[:, ~mask]
+            assert cfgs["musigma"][name] == pytest.approx(
+                float(vals.mean() + 3.0 * vals.std()))
+
+
+class TestLabelAtCfg:
+    """单帧重标。"""
+
+    def test_matches_labeled_mask(self, tau_store):
+        """_label_at_cfg 与弱标签单一口径（binary_label + filter_min_area）一致。"""
+        import weak_labels
+        from evaluate import _label_at_cfg
+
+        slices = {k: tuple(int(x) for x in v)
+                  for k, v in tau_store._meta["slices"].items()}
+        frame = 20
+        # 用 p85 候选
+        import evaluate
+        cfgs = evaluate.tau_candidates_for_store(
+            tau_store, percentiles=(85.0,), include_musigma=False)["p85"]
+        got = _label_at_cfg(tau_store, frame, cfgs, slices, 25)
+        # 手工：该帧 τ → binary_label + filter_min_area
+        ivd_t = np.asarray(tau_store._ivd_mm[frame], dtype=np.float64)
+        tau_t = weak_labels._tau_for_frame(cfgs, frame, slices)
+        expected = weak_labels.filter_min_area(
+            weak_labels.binary_label(ivd_t, tau_t) & (~tau_store._mask2d),
+            min_area=25)
+        assert np.array_equal(got, expected)
+
+    def test_out_of_slice_raises(self, tau_store):
+        """帧不在任何时间片 → fail loud。"""
+        import weak_labels
+        from evaluate import _label_at_cfg
+
+        # 直接触发 label_frame_at_cfg 的"不在任何时间片"守卫（用不覆盖帧 20 的 slices）
+        ivd_t = np.asarray(tau_store._ivd_mm[20], dtype=np.float64)
+        with pytest.raises(ValueError, match="不在任何时间片"):
+            weak_labels.label_frame_at_cfg(
+                ivd_t, tau_store._mask2d, {"test": (0, 18)}, {"test": 1.0},
+                20, min_area=25)
+
+
+class TestRunTauSensitivity:
+    """端到端 τ 敏感性（合成 store + tiny model，结构验证）。"""
+
+    def _run(self, tau_store, tmp_path, percentiles=(95.0, 85.0)):
+        import yaml
+        from evaluate import run_tau_sensitivity
+        from train_kaggle import build_model_from_config
+
+        cfg = yaml.safe_load(_MINIMAL_MODEL_YAML)
+        cfg["data"] = dict(cfg["data"])
+        cfg["data"]["root"] = str(pathlib.Path(tau_store._root))
+        cfg["data"]["t_win"] = 8
+        cfg["data"]["f1_split"] = "test"
+        model = build_model_from_config(cfg)
+        model.eval()
+        return run_tau_sensitivity(
+            model=model, config=cfg, data_root=cfg["data"]["root"],
+            out_dir=str(tmp_path / "tau"), device="cpu", tta=1,
+            display_frames=[20, 22], t_scale=0.25, threshold=0.5,
+            percentiles=percentiles, include_musigma=True)
+
+    def test_rows_and_artifacts(self, tau_store, tmp_path):
+        report = self._run(tau_store, tmp_path)
+        assert len(report["per_dataset"]) == 1
+        rows = report["per_dataset"][0]["rows"]
+        assert [r["tau_cfg"] for r in rows] == ["p95", "p85", "musigma"]
+        for r in rows:
+            assert 0.0 <= r["f1"] <= 1.0
+            assert 0.0 <= r["iou"] <= 1.0
+        assert (tmp_path / "tau" / "tau_sensitivity_table.json").exists()
+        assert (tmp_path / "tau" / "tau_sensitivity_report.md").exists()
+        imported = json.loads(
+            (tmp_path / "tau" / "tau_sensitivity_table.json").read_text(
+                encoding="utf-8"))
+        assert "per_dataset" in imported
+        assert "global" in imported
+
+    def test_area_ratio_monotonic(self, tau_store, tmp_path):
+        """涡面积占比随 τ（分位）升高单调下降。"""
+        report = self._run(tau_store, tmp_path, percentiles=(95.0, 85.0, 75.0))
+        rows = report["per_dataset"][0]["rows"]
+        by = {r["tau_cfg"]: r["vortex_area_ratio"] for r in rows}
+        assert by["p95"] < by["p85"] < by["p75"]
+
+    def test_continuity_constant_across_tau(self, tau_store, tmp_path):
+        """帧间连续性 τ 无关（跨候选为常数）。"""
+        report = self._run(tau_store, tmp_path, percentiles=(95.0, 85.0))
+        rows = report["per_dataset"][0]["rows"]
+        conts = {r["tau_cfg"]: report["per_dataset"][0]["continuity_mean"]
+                 for r in rows}
+        assert len(set(conts.values())) == 1
+        assert report["per_dataset"][0]["continuity_is_tau_independent"] is True
+
+    def test_global_summary(self, tau_store, tmp_path):
+        """全局汇总行覆盖所有候选。"""
+        report = self._run(tau_store, tmp_path, percentiles=(95.0, 85.0))
+        gnames = [r["tau_cfg"] for r in report["global"]]
+        assert gnames == ["p95", "p85", "musigma"]

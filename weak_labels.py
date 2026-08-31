@@ -228,6 +228,21 @@ def build_label_field(ivd, mask2d, taus, slices, min_area=DEFAULT_MIN_AREA):
     return out
 
 
+def label_frame_at_cfg(ivd2d, mask2d, slices, cfg, frame, min_area=DEFAULT_MIN_AREA):
+    """单帧标签（τ 敏感性评估用）：按 frame 所属时间片从 cfg 取 τ 后重标单帧。
+
+    cfg 可为 dict {时间片名: tau}（分位/μ+3σ 逐时间片——compute_tau_candidates
+    口径）或标量（固定 τ）；slices 为 {时间片名: (i0, i1)}。复用 _tau_for_frame
+    与 _labeled_mask 单一公式（与 build_label_field 同口令，防双份漂移）。
+    frame 未被任何时间片覆盖时 fail loud（评估帧应在时间片内）。
+    返回 (Y,X) uint8。
+    """
+    tau = _tau_for_frame(cfg, frame, slices)
+    if tau is None:
+        raise ValueError(f"帧 {frame} 不在任何时间片内（slices={dict(slices)}）")
+    return _labeled_mask(ivd2d, tau, mask2d, min_area)
+
+
 # --------------------------------------------------------------------------- 正样本占比（支撑过采样）
 
 def patch_seed_offsets(patch_size=(32, 32), xdim=None, ydim=None,
