@@ -135,7 +135,8 @@ python train_kaggle.py --config config/pathline_transformer_multi.yaml \
 ```
 
 无 val 片（60/40）→ 训练期 val_loss 监控自动跳过（"数据集无 'val' 时间片"警告）；
-留出评估指标 = **F1 + IoU**（`evaluate_f1`，自然分布序）；`--f1-split` 指定的片不存在时
+**结算指标（2026-08-29 用户定）＝ test 片自然分布 Precision/Recall/F1**（阈值 0.5 判正；
+`evaluate_f1` 联合混淆计数，IoU 附带记录）；`--f1-split` 指定的片不存在时
 fail loud（不静默跳过）。τ 与归一化逐数据集各自（各 meta 的 p85 分位 τ、ivd μ/σ、
 speed_max——跨数据集输入尺度一致化）。
 
