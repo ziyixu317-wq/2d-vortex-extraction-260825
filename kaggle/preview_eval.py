@@ -1,4 +1,6 @@
-"""单帧涡提取预览（07 票：12h 中途看模型效果的轻量入口；正式评估属票 08）。
+"""历史单帧涡提取预览实现（deprecated Kaggle 入口）。
+
+服务器请使用 ``python server/preview_eval.py``；此模块保留同一实现以兼容旧测试。
 
 领域词汇（HANDOFF §3/§4 与规格，唯一权威）：
 - 用途：加载 latest checkpoint → 指定帧的滑窗样本（patch stride 16 全场覆盖）→
@@ -12,7 +14,7 @@
 
 用法：python kaggle/preview_eval.py --config config/pathline_transformer_cylinder.yaml \
       --ckpt outputs/train/pathline_transformer_cylinder_ckpt_latest.pth \
-      --frame 1300 --out outputs/preview/prob_vs_ivd_t1300.png [--tta 3] [--device cuda]
+      --frame 1300 --out outputs/evaluation_server/prob_vs_ivd_t1300.png [--tta 3] [--device cuda]
 """
 
 from __future__ import annotations
@@ -174,12 +176,12 @@ def main(argv=None):
     ap.add_argument("--frame", type=int, required=True, help="展示帧（须在时间片内且窗口不越界）")
     ap.add_argument("--dataset", type=int, default=0,
                     help="多数据集 root 列表中的索引（默认 0；单 root 恒 0）")
-    ap.add_argument("--out", default=None, help="输出 png 路径（默认 outputs/preview/）")
+    ap.add_argument("--out", default=None, help="输出 png 路径（默认 outputs/evaluation_server/）")
     ap.add_argument("--tta", type=int, default=1, help="TTA 采样次数（PSL 随机；默认 1 快）")
-    ap.add_argument("--device", default="cpu", help="设备（Kaggle = cuda）")
+    ap.add_argument("--device", default="cpu", help="设备（服务器可用 cuda）")
     args = ap.parse_args(argv)
 
-    out = args.out or f"outputs/preview/prob_vs_ivd_t{args.frame}.png"
+    out = args.out or f"outputs/evaluation_server/prob_vs_ivd_t{args.frame}.png"
     prob, ivd, label = run_preview(args.config, args.ckpt, args.frame, out,
                                    tta=args.tta, device=args.device,
                                    dataset_idx=args.dataset)

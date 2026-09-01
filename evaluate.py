@@ -1038,7 +1038,7 @@ def main(argv=None):
     else:
         config = {
             "data": {
-                "root": args.data_root or "outputs/dataset",
+                "root": args.data_root or "outputs/datasets/pipedcylinder2d/dataset",
                 "patch_size": [32, 32], "stride": [16, 16],
                 "t_win": 24, "window_step": 4,
                 "t_scale": args.t_scale, "seed": args.seed,
@@ -1071,7 +1071,7 @@ def main(argv=None):
     if args.data_root:
         roots = [r.strip() for r in args.data_root.split(",") if r.strip()]
     else:
-        raw_root = config["data"].get("root", "outputs/dataset")
+        raw_root = config["data"].get("root", "outputs/datasets/pipedcylinder2d/dataset")
         if isinstance(raw_root, (list, tuple)):
             roots = [str(r) for r in raw_root]
         else:

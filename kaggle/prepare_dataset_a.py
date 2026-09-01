@@ -1,4 +1,7 @@
-"""Kaggle Dataset A 打包（07 票）：nc 数据 + prepare_dataset 产物 → 可上传目录/zip。
+"""历史 Kaggle Dataset A 打包器（deprecated）。
+
+服务器直接同步 ``outputs/datasets/``，不再执行 Dataset 打包或上传；本模块仅为旧
+快照兼容与历史测试保留。
 
 领域词汇（HANDOFF §4/§5 与规格，唯一权威）：
 - Dataset A = nc 数据文件 + 预处理产物（票 05 prepare_dataset 的 meta.json +

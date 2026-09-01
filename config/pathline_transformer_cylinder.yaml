@@ -1,7 +1,7 @@
 # 迹线 Transformer 涡提取 —— 训练配置（06 票：训练脚本）
 #
 # 全部超参的单一来源（HANDOFF §2 模型事实/论文附录 C、§6 参数表、规格 Implementation
-# Decisions）。Kaggle 训练时本文件随 Dataset B（整个 pipeline 目录）上传。
+# Decisions）。服务器训练时本文件随 Git 仓库 clone/fetch，数据目录按服务器工作区解析。
 #
 # 模型段沿用官方 config/segmentation/pathline_transformer.yaml 形态（BaseSeg 包装
 # PathlineTransformerV0 + BCELoss），口径按产品决策 6 调整：KpathlinePerGroup=4、
@@ -9,15 +9,12 @@
 
 # ---------------------------------------------------------------------------- 数据
 data:
-  root: outputs/dataset          # prepare_dataset 产物目录（meta.json + memmap）
-  split: train                   # 训练片（HANDOFF §6：train [0,10]s）
-  val_split: val                 # 验证片（(10,12.5]s）；val 损失按训练同款 50% 平衡
-                                 # 采样口径监控（自然分布精度评估属票 08 弱定量表）
+  root: outputs/datasets/pipedcylinder2d/dataset  # 服务器上的逐数据集 memmap
+  split: train                   # frac 口径训练片（前 60% 帧）
+  val_split: val                 # 单数据集配置保留 val 监控；多数据集交付线用 multi.yaml 的 test 留出
   batch_size: 100
-  num_workers: 4                 # Kaggle T4×2 环境 4 核（torch 建议 ≤4；8 曾触发 warning）
-  samples_per_epoch: 20000       # HANDOFF §6 下限（2026-08-25 票 07 步速校准回写：
-                                 # T4×2 实测 ~5s/步 → 40000×200 epoch ≈110h 超预算 4×；
-                                 # 降半至 20000 + TF32 → 预计 ~35-55h（50% 正样本过采样不变）
+  num_workers: 8                 # SHU-server 40 核；共享资源紧张时可降至 4
+  samples_per_epoch: 20000       # HANDOFF §6 默认值；按服务器 GPU 实测可调
   positive_fraction: 0.5         # 50% 正样本过采样（训练抗失衡）
   patch_size: [32, 32]
   stride: [16, 16]
@@ -53,15 +50,13 @@ train:
   warmup_epochs: 60              # TwoStep 第一段（恒 lr；warmup 名称沿用官方）
   second_lr: 0.000005            # TwoStep 第二段（epoch ≥ 60）
   grad_clip: 1.0                 # 梯度裁剪范数
-  val_freq: 10                   # 每 N epoch 跑一次 val loss（val=20000 样本 ≈17.5min；
-                                 # 10 与 5 相比监控频率减半、开销占块 ~7%；2026-08-25 校准）
+  val_freq: 10                   # 每 N epoch 跑一次 val loss（按服务器步速调整）
   save_freq: 30                  # 里程碑快照频率（原仓库取值）；latest 仍每 epoch 更新
   seed: 0
-  device: auto                   # auto = cuda 可用则 cuda（Kaggle T4），否则 cpu
+  device: auto                   # auto = CUDA 可用则 cuda，否则 cpu；用 CUDA_VISIBLE_DEVICES 选卡
   amp: false                     # 关闭：上游模型 propagate_features 原地 index-put
                                  # 在 AMP(Half) 下 dtype 冲突（实测 RuntimeError；
                                  # 迁移忠实性不允许改 vendor）→ 显存用 DP 拆分解决
-  data_parallel: true            # DataParallel（Kaggle T4×2 自动生效：batch 100 →
-                                 # 每卡 50 ≈ 6.8GB 峰值 < 16GB；单卡自动跳过）
+  data_parallel: false           # 单卡默认；预留多卡时显式改 true 并限制可见 GPU
   ckpt_dir: outputs/train
   run_name: pathline_transformer_cylinder

@@ -19,8 +19,8 @@
   划分；τ 与归一化逐数据集各自——跨数据集输入尺度一致化）。
 
 性能说明（验收记录披露）：on-the-fly 提取 = extract_pathlines_batched（真实窗口
-实测 ~35ms，Kaggle 多进程 DataLoader 下 0.44s/batch(100) < T4 训练步时，不构成
-训练瓶颈；本地 <5ms 预算未达成，用户已确认不纠结——仅要求能跑）。
+实测 ~35ms；服务器多进程 DataLoader 可隐藏大部分加载时间，不构成训练瓶颈；
+本地 <5ms 预算未达成，用户已确认不纠结——仅要求能跑）。
 
 实现约束：h5py 直读中文路径（prepare_dataset 的 nc_path 分支）；纯 python/numpy
 （遵守 §2 依赖清单：torch、numpy、h5py、yaml、matplotlib、tqdm）。
@@ -45,7 +45,7 @@ DEFAULT_T_WIN = 24
 DEFAULT_WINDOW_STEP = 4
 DEFAULT_SAMPLES_PER_EPOCH = 40000
 # 每 epoch 样本数规格下限 20000（HANDOFF §6：默认 40000、下限 20000）——
-# 为 Kaggle 训练配置的语义约束（训练脚本选用 ≥20000），不作为运行时钳制
+# 训练配置的语义约束（训练脚本选用 ≥20000），不作为运行时钳制
 #（合成/测试可用更小值快速迭代）。
 DEFAULT_POSITIVE_FRACTION = 0.5
 DEFAULT_T_SCALE = 0.25

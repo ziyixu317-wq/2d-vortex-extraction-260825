@@ -1,4 +1,7 @@
-"""Kaggle Dataset A 挂载布局探测（mount_probe.py）——票 07 延伸运行反馈修复。
+"""历史 Kaggle Dataset 挂载布局探测（deprecated）。
+
+服务器使用固定的 ``/data/xuziyi/cylinder_vortex_pipeline`` 工作区，不需要挂载探测；
+本模块仅为旧快照兼容与历史测试保留。
 
 领域词汇（HANDOFF §2 / 票 07 三期与延伸，唯一权威）：
 - Kaggle Add Input 的挂载结构 = `{root}/datasets/<owner>/<slug>/...`（多级嵌套，

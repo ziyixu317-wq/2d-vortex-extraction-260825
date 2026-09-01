@@ -1,0 +1,45 @@
+# 迹线 Transformer 涡提取 —— cavity2d_re1000 严格零样本评估配置
+#
+# 与联合训练口径的差异：cavity2d_re1000 仅 21 帧，因此使用 t_win=16；模型的
+# L=16、K=256、C=7 输入口径及 t_scale=0.25 保持不变。时间片为全帧单片，
+# τ 与归一化统计取该数据集自己的 meta.json。
+#
+# 用法示例：
+# python server/preview_eval.py \
+#   --config config/pathline_transformer_cavity_eval.yaml \
+#   --ckpt outputs/_ckpt130/train_multi/pathline_transformer_multi_ckpt_latest.pth \
+#   --dataset 0 --frame 3 --tta 3 --device cpu \
+#   --out outputs/evaluation_smoke/cavity2d_t3.png
+
+data:
+  root: [outputs/datasets_new/cavity2d_re1000/dataset]
+  split: train
+  val_split: none
+  batch_size: 100
+  num_workers: 0
+  samples_per_epoch: 8
+  positive_fraction: 0.5
+  patch_size: [32, 32]
+  stride: [16, 16]
+  t_win: 16
+  window_step: 4
+  t_scale: 0.25
+  groups: [8, 8]
+  delta_frac: 0.05
+  L: 16
+  n_substeps: 4
+  seed: 0
+
+model:
+  NAME: BaseSeg
+  encoder_args:
+    NAME: PathlineTransformerV0
+    in_channels: 7
+    PathlineGroups: 64
+    KpathlinePerGroup: 4
+    num_classes: 1
+    num_encoder_layers: 3
+    dmodel: 144
+    k: 16
+  criterion_args:
+    NAME: BCELoss

@@ -5,8 +5,8 @@
 # - data.root = 6 个 prepare_dataset 产物目录列表（含既有 pipedcylinder2d；
 #   各目录由 prepare_multi.py 逐数据集预处理生成，mask 随数据集、不进模型输入）。
 #   2026-08-29 用户决策：**forceddampedduffing2d 移出训练池**（用户判定该数据集
-#   有问题，7→6 roots）。Kaggle Dataset A 无需重传——config root 即训练池唯一
-#   来源，cell 3 多链接的目录不参与池构建/训练（本地打包目录可留可删）；
+#   有问题，7→6 roots）。配置中的 6 个 root 是训练池唯一来源；服务器只需同步这些
+#   memmap 目录，不必上传未使用的数据集；
 # - 时间划分 = frac 60/40（各数据集帧前 60% 训 / 后 40% 测，无 val 片）——
 #   训练期无 val 监控（main 警告并跳过）；留出评估用
 #   `--report-f1 --f1-split test`（跨数据集 test 片自然分布 F1/IoU 记录）；
@@ -15,8 +15,10 @@
 # - **结算口径 130 epoch**（2026-08-29 用户决策：43-86 loss 已趋稳（0.0873→
 #   0.0811），86 续跑 44 → 130 结算，原 200 中止——HANDOFF §11）。
 #
-# 用法：python train_kaggle.py --config config/pathline_transformer_multi.yaml \
-#           [--report-f1 --f1-split test]
+# 服务器用法（Remote-SSH 终端）：
+#   CUDA_VISIBLE_DEVICES=0 python train_kaggle.py \
+#     --config config/pathline_transformer_multi.yaml --resume auto \
+#     --report-f1 --f1-split test
 
 # ---------------------------------------------------------------------------- 数据
 data:
@@ -31,9 +33,8 @@ data:
   val_split: none                # 无 val 片（60/40 留出；监控跳过；留出评估 =
                                  # --report-f1 --f1-split test）
   batch_size: 100
-  num_workers: 4                 # Kaggle T4×2 环境 4 核
-  samples_per_epoch: 20000       # HANDOFF §6 下限（票 07 步速校准：5.3s/步，
-                                 # 每 epoch 200 步；多数据集增大池量不变更口径）
+  num_workers: 8                 # SHU-server 40 核；共享资源紧张时可降至 4
+  samples_per_epoch: 20000       # HANDOFF §6 默认值；按服务器 GPU 实测可调
   positive_fraction: 0.5         # 50% 正样本过采样（联合池）
   patch_size: [32, 32]
   stride: [16, 16]
@@ -74,6 +75,6 @@ train:
   seed: 0
   device: auto
   amp: false                     # 上游模型 AMP 不兼容（HANDOFF §7）
-  data_parallel: true            # Kaggle T4×2（batch 100 → 每卡 50）
+  data_parallel: false           # 服务器默认只占 CUDA_VISIBLE_DEVICES 指定的空闲 GPU
   ckpt_dir: outputs/train_multi
   run_name: pathline_transformer_multi

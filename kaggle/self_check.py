@@ -1,13 +1,15 @@
-"""Kaggle Notebook 环境自检（07 票，验收 1）：import vendor + 数据加载 + 模型前向。
+"""历史自检实现（deprecated Kaggle 入口）。
+
+服务器请使用 ``python server/self_check.py``；此模块保留同一检查实现以兼容旧测试。
 
 领域词汇（HANDOFF §4/§5 与规格，唯一权威）：
-- 验收 1：Notebook 环境 import vendor + 数据加载通过（Kaggle 端真实运行 = 用户执行，
-  本模块是同一检查的可复现实现——本地 CPU 可先验）；
+- 验收 1：服务器环境 import vendor + 数据加载通过（本模块保留历史实现，
+  当前入口为 ``server/self_check.py``）；
 - 模型缝：迹线样本 (B, L=16, K=256, C=7) → 每迹线涡概率 (B, 256)、域 (0,1)（sigmoid）；
 - 数据加载：WeakLabelPathlineDataset on-the-fly（set_epoch 后取 n_samples）；
   样本有限无 NaN、标签 0/1（弱标签口径）。
 
-用法：python kaggle/self_check.py --data-root outputs/dataset
+兼容用法：python kaggle/self_check.py --data-root outputs/datasets/pipedcylinder2d/dataset
       [--config config/pathline_transformer_cylinder.yaml] [--device cpu]
 """
 
@@ -91,11 +93,11 @@ def self_check(data_root, config_path=None, device="cpu", n_samples=4,
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Kaggle Notebook 环境自检")
-    ap.add_argument("--data-root", default="outputs/dataset",
-                    help="Dataset A 解压后的 prepare_dataset 产物目录")
+    ap = argparse.ArgumentParser(description="历史环境自检（服务器请使用 server/self_check.py）")
+    ap.add_argument("--data-root", default="outputs/datasets/pipedcylinder2d/dataset",
+                    help="服务器上的逐数据集 memmap 目录")
     ap.add_argument("--config", default=None, help="生产 YAML 配置路径（默认不读）")
-    ap.add_argument("--device", default="cpu", help="设备（Kaggle = cuda）")
+    ap.add_argument("--device", default="cpu", help="设备（服务器可用 cuda）")
     ap.add_argument("--n-samples", type=int, default=4, help="抽查样本数")
     args = ap.parse_args(argv)
     r = self_check(args.data_root, config_path=args.config,

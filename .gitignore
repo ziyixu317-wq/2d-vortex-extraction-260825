@@ -8,7 +8,7 @@ venv/
 # Notebooks
 .ipynb_checkpoints/
 
-# 数据与中间产物（数据集与预计算走 Kaggle Dataset，不进 GitHub）
+# 数据与中间产物（预处理 memmap 通过 SSH/文件同步，不进 GitHub）
 *.nc
 *.npy
 *.npz
@@ -21,7 +21,7 @@ runs/
 results/
 outputs/
 
-# Kaggle Dataset 打包产物（本地生成 → 上传 Kaggle，不进 git；单数据集与多数据集两种 staging）
+# 历史 Kaggle 兼容打包产物（当前服务器流程不使用，不进 git）
 kaggle_dataset_a*/
 kaggle_dataset_a*.zip
 

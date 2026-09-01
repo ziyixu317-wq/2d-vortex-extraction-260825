@@ -12,14 +12,15 @@
 
 - 论文：Zotero `zotero://user/0/item/T76G9Z3A`，DOI 10.1111/cgf.70042，开源仓库 `PyflowVis-main`（Apache 2.0）
 - 原始参考仓库（只读参考，不直接依赖）：`C:\Users\徐子屹\Desktop\AI CFD\PyflowVis-main`
-- 数据集文件：`C:\Users\徐子屹\Desktop\AI CFD\CFD数据集\pipedcylinder2d.nc`
-- 本项目目录（自包含，见 §4）：`C:\Users\徐子屹\Desktop\AI CFD\cylinder_vortex_pipeline\`
+- 本地迁移后的项目目录（唯一工作目录）：`E:\codex\AI CFD\cylinder_vortex_pipeline\`
+- 本地迁移后的原始数据目录：`E:\codex\AI CFD\CFD数据集\`（原始 nc 只作重算来源）
+- 服务器执行目录（VS Code Remote-SSH）：`/data/xuziyi/cylinder_vortex_pipeline/`
 
 ## 1. 用户已拍板的决策（默认不再争论，除非用户主动改口）
 
 1. **训练标签**：直接用 IVD/Q-criterion 阈值给仿真数据打**弱标注**（标签 = 迹线种子点处 IVD ≥ τ）。**不走** Vatistas 参数拟合/合成数据管线。
-2. **模型**：论文主体的迹线 Transformer，**从头训练**；不使用仓库预训练权重与 demo 验证集（用户已在 Kaggle 验证过模型可用）。
-3. **训练**：Kaggle T4×2，**200 epoch**；本地（核显、torch 2.10.0+cpu、无 CUDA）只做 CPU 冒烟。（2026-08-29 多数据集线**结算口径改为 130 epoch**：43-86 loss 已趋稳（0.0873→0.0811），用户拍板 130 结算、原 200 中止；§5/§6/§11 已回写。单数据集线（暂缓）仍 200。）
+2. **模型**：论文主体的迹线 Transformer，**从头训练**；不使用仓库预训练权重与 demo 验证集（早期 GPU 实验已确认模型可用）。
+3. **训练**：当前通过 VS Code Remote-SSH 在服务器执行，多数据集联合线按 **130 epoch** 结算；每 epoch checkpoint，`--resume auto` 跨 SSH 会话续训。服务器实测为 4×RTX 3090 24 GiB，默认只使用 `CUDA_VISIBLE_DEVICES` 指定的空闲单卡、`data_parallel=false`、`amp=false`；本地 CPU 只做测试和冒烟。Kaggle 流程仅作历史记录，不再是执行前提。单数据集线（暂缓）仍保留 200 epoch 配置。
 4. **评估**：定性对比（IVD/Q-criterion 为参考）+ 弱定量表；不涉及 Vatistas 验证集。
 5. **不做 ivd 遮除消融**：IVD 是公认高精度涡判据，模型学习其近似是可接受且预期的。
 6. **迹线口径 = 256 条**：64 组 × 4 卫星点（不含中心），`KpathlinePerGroup=4`，对齐论文与发布数据。
@@ -37,7 +38,7 @@
 | 域 | x∈[-0.5,5.5]，y∈[-0.5,1.5]；u∈[-3.0,4.6]，v∈[-2.3,2.4] |
 | 质量 | 全量无 NaN；**41.8% 细胞近零速（每帧固定 28213 个）**= 静态固体几何（台阶管道壁面+圆柱+死区） |
 | 固体几何（票 02 实测） | 全帧取与（\|v\|<1e-5）后 **4 个连通块**：两块矩形壁面（x∈[2.5,5.5],y∈[-0.5,0.5] 与 x∈[-0.5,1.5],y∈[0.5,1.5]，接触域边界）+ **两个孤立圆柱**：入口 (≈0,0) 与拐角后管道 (≈3,1)，零速盘 43/45 格（圆角方块，等效半径≈0.047）；radius=0.0625 与 Re=160=U·D/ν（U=1, D=2r, ν=0.00078125）自洽；零速区为圆柱**内切区**（表面约 1 格厚格被插值为非零速），物理半径≈面积等效+1 格≈0.063 |
-| 坑 | netCDF4 的 C 库打不开中文路径（实测）；**h5py 可直接读中文路径** → 一律用 h5py。Kaggle 路径为 ASCII 无此问题 |
+| 坑 | netCDF4 的 C 库打不开中文路径（实测）；**h5py 可直接读中文路径** → 一律用 h5py。服务器路径采用 ASCII，仍建议原始 nc 上传到 `/data/xuziyi/cfd_raw/` |
 | 可用 patch（票 05 实测） | 216 个 patch 位置中 **128 个可用**（88 个不可用：种子-中心线段全固体——壁面区/圆柱包围区；票 03 "全固体 patch 应避开"边界）；池组合 31,360（train 片：正 13,652=43.5%、负 17,708） |
 
 ### 多数据集盘点（票 07 延伸实测 2026-08-25，`CFD数据集/` 下 6 个新数据集 + 既有 pipedcylinder2d）
@@ -57,8 +58,8 @@
 > 信息（静态场伪时间维 + 边界伪影正样本 + 标签无涡语义），入池属负价值。
 > 用户保持移出决策（2026-08-29 已执行 roots 7→6）。另：此前 7 数据集盘点只覆盖
 > 统计量、未逐数据集验证"时间演化 + 涡结构符合官网"——duffing 暴露此盲点
-> （§7 已建议对 6 个既有数据集补做体检）。Kaggle Dataset A 无需重传——config root 即
-> 训练池唯一来源，cell 3 多链接的目录不参与池构建/训练（本地打包目录可留可删）。
+> （§7 已建议对 6 个既有数据集补做体检）。配置中的 6 个 root 是训练池唯一来源；服务器
+> 只需同步这些 memmap 目录，未使用的数据集不参与池构建/训练。
 
 | 数据集 | (T,Y,X) | 域 / t 范围 | speed_max | 固体（全帧取与 \|v\|<1e-5） | τ（p85，train/test frac 片） | 标签正格（流体区） |
 |---|---|---|---|---|---|---|
@@ -72,7 +73,7 @@
 
 - 全部 h5py 直读（中文路径无碍）、等距网格、采样帧无 NaN；**IVD 量纲跨数据集差 ~300×**（doublegyre τ=0.0022 vs jung 0.2189 vs pipedcylinder 0.64）→ **τ 必须逐数据集同分位**（绝对固定值不可移植，票 07 延伸定案）；
 - **时间片必须按帧比例划分**（frac）：jung 的 t 从 1.107 起、各数据集帧数 512~2001 且 dt 各异（0.0078~0.0196）——绝对秒数（10/12.5/15s）只对 pipedcylinder2d 有效；
-- 多数据集预处理产物：`outputs/datasets/<名>/{geometry,dataset,previews}` + `outputs/datasets/multi_meta.json`（逐数据集 shape/slices/taus/统计汇总；≈3.8GB，gitignore 走 Kaggle Dataset）；
+- 多数据集预处理产物：`outputs/datasets/<名>/{geometry,dataset,previews}` + `outputs/datasets/multi_meta.json`（逐数据集 shape/slices/taus/统计汇总；约 3.8GB，gitignore，通过 E 盘→服务器文件同步）；严格零样本 cavity 产物位于 `outputs/datasets_new/cavity2d_re1000/`。
 - 多数据集池（train，7 root 实测：正 78,351 / 负 82,757 组合，池构建 ~2s；联合池量远超每 epoch 2 万样本需求（50% 过采样仅取正池 1/8）。**2026-08-29 起 6 root（duffing 移除），池量相应减小，口径不变**）。
 
 ### 模型事实（`DeepUtils/models/segmentation/pathline_transformer.py`）
@@ -91,17 +92,18 @@
 - 原仓库 `utils/__init__.py → config.py` 需要 `multimethod` → 迁移时**剔除 config.py**，重写 utils 的 `__init__.py` 只导出所需符号
 - **不要**导入原仓库的 `DeepUtils/dataset`、`FLowUtils`、`train.py`、`test.py`、`MiscFunctions.py`（拖入 numba/pybind/GUI/wandb）
 - `loss/build.py` 已注册 `BCELoss`；`registry.build` 接受普通 dict 配置
-- 最终依赖清单：torch、numpy、h5py、PyYAML（pip 包名；import 名 yaml）、matplotlib、tqdm（本地 Python 3.12 已装除 torch 外全部；Kaggle 自带 torch）
+- 最终依赖清单：torch、numpy、h5py、PyYAML（pip 包名；import 名 yaml）、matplotlib、tqdm。本地测试可用 CPU；SHU-server 已核实 Python 3.12.14、PyTorch 2.7.1+cu118、CUDA 11.8，依赖安装到 `/data/xuziyi/envs/xuziyi`，缓存放 `/data/xuziyi/`。
+- SHU-server 资源（2026-09-01 实测）：40 CPU 核、约 251 GiB 内存、4×NVIDIA RTX 3090 24 GiB；GPU 为共享资源，运行前必须 `nvidia-smi`，默认选择空闲 GPU 0（必要时改 `CUDA_VISIBLE_DEVICES`）。根分区已满，`TMPDIR`/pip/matplotlib 缓存不得写入 `/tmp`、`/home`。
 - C++ 生成器只支持解析场（`PathlineIntegrationInfoCollect2D` 对离散场 assert）→ 迹线提取必须自写（`extractor.py`）
 
 ## 3. 目标与验收标准
 
-**总目标**：在 `pipedcylinder2d.nc` 上从头训练迹线 Transformer，输出可信的涡提取结果。
+**总目标**：在六个有效数据集（含 `pipedcylinder2d`）上联合训练迹线 Transformer，并对代表性数据及严格零样本 cavity 输出可信的涡提取结果。
 
 验收标准（全部满足才算完成）：
-1. 预测涡区域与 IVD/Q-criterion 参考结构一致（涡街、拐角回流区），无明显碎裂噪声（**票 08 交付**：对比图/弱定量表已实现并经真实数据 smoke（130-epoch 权重，pipdycylinder2d test 帧 1300，涡街/拐角涡对应良好）；最终目检待用户复核）
-2. 200 epoch 训练完成，checkpoint 归档，训练可跨 Kaggle 会话断点续训（**2026-08-29 多数据集线结算口径改 130 epoch**——用户决策，§11；单数据集线仍 200）
-3. 交付：多个代表性时间步的对比图 + mp4 动画 + 弱定量表（对 IVD 阈值的 F1/IoU、涡面积占比、帧间连续性）+ 复现 README（**票 08 交付**：evaluate.py 产对比图/mp4（ffmpeg 缺失回退 gif）/弱定量表；复现 README 在 kaggle/README.md，票 07 已交付）
+1. 预测涡区域与 IVD/Q-criterion 参考结构一致（涡街、拐角回流区），无明显碎裂噪声（**票 08 交付**：对比图/弱定量表已实现并经真实数据 smoke（130-epoch 权重，pipedcylinder2d test 帧 1300，涡街/拐角涡对应良好）；最终目检待用户复核）
+2. 多数据集线 **130 epoch** 训练完成，checkpoint 归档，训练可跨 Remote-SSH 会话用 `--resume auto` 续训（单数据集线仍保留 200 epoch 配置）
+3. 交付：多个代表性时间步的对比图 + mp4 动画 + 弱定量表（对 IVD 阈值的 F1/IoU、涡面积占比、帧间连续性）+ 复现 README（**票 08 交付**：evaluate.py 产对比图/mp4；无 ffmpeg 时回退 gif；当前入口为根 README 与 `server/README.md`）
 4. 多阈值敏感性报告（τ 的稳健性说明）（**已交付**：label 级 multi_tau_report（票 07 延伸）；**评估指标级 τ 敏感性表 + 报告（票 09）**——`evaluate.py --tau-sensitivity` 复用滑窗 TTA 推理重标，输出 τ × F1/IoU/涡面积占比/帧间连续性：实测 p85 达 F1 峰值 0.6610，见 `outputs/tau_sensitivity/`）
 
 ## 4. 目录结构与代码清单（阶段 0 迁移产物）
@@ -118,11 +120,13 @@ cylinder_vortex_pipeline/
 ├── weak_labels.py               # IVD（5×5 局部邻域均值）+ Q-criterion + 阈值标签 + 多阈值敏感性报告
 ├── dataset.py                   # WeakLabelPathlineDataset（h5py+memmap，on-the-fly）+ _DatasetStore/MultiDatasetPathlineDataset（多数据集联合池，票 07 延伸）
 ├── prepare_multi.py             # 多数据集逐数据集预处理驱动（geometry→IVD/label/τ→memmap+meta，票 07 延伸）
-├── train_kaggle.py              # 自写训练脚本（TwoStep、断点续训、可选 DataParallel/AMP；票 07 增 --report-f1；票 07 延伸增 --f1-split/F1+IoU）
+├── train_kaggle.py              # 历史文件名；服务器训练脚本（TwoStep、断点续训、可选 DataParallel/AMP、--report-f1）
 ├── evaluate.py                  # TTA 推理、网格投影、对比图/动画、弱定量表
-├── kaggle/                      # 票 07：Kaggle Notebook/打包/分块/自检/操作手册
+├── server/                      # Remote-SSH 自检/预览入口与服务器执行手册
+├── kaggle/                      # 历史 Kaggle 兼容代码（已废弃，不是当前执行路径）
 ├── config/pathline_transformer_cylinder.yaml  # 单数据集训练配置
 ├── config/pathline_transformer_multi.yaml     # 多数据集联合训练配置（票 07 延伸）
+├── config/pathline_transformer_cavity_eval.yaml # cavity2d_re1000 严格零样本评估配置
 ├── CLAUDE.md                   # agent 入口说明（唯一权威仍是本文件）
 ├── docs/agents/                # ask-matt 配置：issue-tracker.md / triage-labels.md / domain.md
 ├── HANDOFF.md                   # 本文件
@@ -133,8 +137,8 @@ cylinder_vortex_pipeline/
 - **geometry.py**：|v|<ε 逐帧取与 → 连通域标记 → 输出 `mask.npy`（种子排除、迹线截断、IVD 置零共用）+ `geometry_meta.json`（块统计与圆柱定位）；圆柱 = 不与壁相连的孤立连通块（无尺寸判据；pipedcylinder2d 实测 2 个：入口 (≈0,0) 与拐角后 (≈3,1)）；无障碍物数据集输出空掩膜，代码路径不变。**每个新数据集各自跑一遍**，掩膜随数据集的 (T,Y,X) 存储。
 - **extractor.py**：全局场积分（允许迹线离开 patch）；种子落固体 → 重播种（仿 C++ `JittorReSeeding`）；迹线入固体 → 截断并重复末点（不引入 -1000 毒值）；位置按 patch 归一化到 [-1,1]（可超界）。
 - **weak_labels.py**：中心差分 ω=∂v/∂x−∂u/∂y，IVD=|ω−5×5 邻域均值|；标签 = IVD(种子,t0)≥τ + 5×5 最小面积连通域过滤；固体区 IVD=0。
-- **dataset.py**：时间划分 train [0,10]s / val (10,12.5] / test (12.5,15]（帧 0-1000 / 1000-1250 / 1250-1500，无时间泄漏）；patch 32×32 stride 16，窗口 T_win=24 帧、起点步长 4 帧；每 epoch 40000 样本、50% 正样本过采样；u,v 与预计算 IVD 存 memmap（IVD 一次算好 ≈405MB）；返回 `((dummy_field, pathlines), labels)` 匹配模型输入；正样本 = patch 内存在 ≥1 条涡迹线。
-- **train_kaggle.py**：不 import 原仓库 train.py；TwoStep（warmup 60 epoch @1e-4 → 5e-6）；梯度裁剪 1.0；每 epoch 存 checkpoint（含 optimizer 状态）；batch 100。
+- **dataset.py**：单数据集支持 abs 时间片，多数据集使用 frac（各数据集前 60% 训练、后 40% 测试，无泄漏）；patch 32×32 stride 16，窗口默认 T_win=24 帧、起点步长 4 帧（严格零样本 cavity 配置单独使用 16 帧）；每 epoch 默认 20000 样本、50% 正样本过采样；u,v 与预计算 IVD 存 memmap；返回 `((dummy_field, pathlines), labels)` 匹配模型输入；正样本 = patch 内存在 ≥1 条涡迹线。
+- **train_kaggle.py**：不 import 原仓库 train.py；文件名为历史兼容，当前在 Remote-SSH 服务器运行；TwoStep（warmup 60 epoch @1e-4 → 5e-6）；梯度裁剪 1.0；每 epoch 存 checkpoint（含 optimizer 状态）；batch 100；`--resume auto` 跨 SSH 会话续训。
 - **evaluate.py**：滑窗推理（stride 16 全场覆盖 + 贴边补全）→ TTA 5 次平均 → 网格投影（累积+计数平均消 patch 重叠）；展示帧模型概率面板用滑窗 prob_sw（patch 归一化与训练一致——加密种子 dense 全场归一化会分布偏移致输出退化，保留为独立工具+单测）；对比图（模型/IVD/Q/速度模+弱标签等值线）→ mp4 动画（ffmpeg 缺失回退 gif）+ 弱定量表（F1/IoU、标签参考与模型预测涡面积占比、帧间连续性）+ **τ 敏感性评估（票 09：`--tau-sensitivity` 复用推理重标 → τ × 指标表 + 报告）**；底图用速度模场（不依赖 LIC 渲染器）。
 
 ## 5. 阶段计划（每阶段有完成判据）
@@ -146,11 +150,11 @@ cylinder_vortex_pipeline/
 - **阶段 2 弱标签校验**：IVD/Q 图 + 正样本占比统计。
   判据：标签在涡街/拐角涡处成连通块、非涡区干净。
 - **阶段 3 数据集类**：dataset.py + memmap 预计算 + 归一化（px,py→[-1,1] patch 内；t→[0,1]×t_scale；ivd 标准化；distance 用归一化坐标；u,v÷全局最大速度）。
-  判据：单样本生成 <5ms（**2026-08-25 用户放宽：时间性能不纠结、能跑即可**——on-the-fly 实测 ~35ms 已记录，Kaggle 8-worker 下不构成训练瓶颈）；train/val/test 划分无泄漏。
-- **阶段 4 Kaggle 上传**：Dataset A = nc 文件；Dataset B = 整个 pipeline 目录。
-  判据：Notebook 里 `pip install h5py PyYAML matplotlib tqdm` 后能 import vendor 并加载数据。
-- **阶段 5 训练**：先 1 epoch 冒烟实测每步耗时 → 校准 epoch 样本数（T4 单卡预计 0.8~1.3s/步 → 80k 步约 18~29h，超预算则用 DataParallel/AMP/降样本数）；**Kaggle 会话硬上限 12h** → 分块 ≤8h，每 epoch checkpoint，块尾打包为 Kaggle Dataset 新版本，下次会话恢复。
-  判据：200 epoch 完成，val F1 记录，checkpoint 归档。（代码机制已在票 07 交付——kaggle/ Notebook 自动基准/预算检查/分块/续训/块尾发布 + `--report-f1` val F1 记录；**200 epoch 实跑与实测值回填为用户 Kaggle 执行项**，见票 07 完成记录与 `kaggle/README.md`。**2026-08-29 多数据集线结算口径改 130 epoch**（86 续跑 44；loss 趋稳观察）——阶段 5 判据在多数据集线上以 130 + `{run}_test_f1.json` 为准。）
+  判据：单样本生成 <5ms（**2026-08-25 用户放宽：时间性能不纠结、能跑即可**——on-the-fly 实测 ~35ms 已记录，服务器 8-worker 下不构成训练瓶颈）；train/val/test 划分无泄漏。
+- **阶段 4 SSH Remote 服务器环境与数据同步**：本地 E 盘维护代码；VS Code Remote-SSH 连接服务器后 clone/fetch 仓库，将 `outputs/datasets/`（及可选 `datasets_new/`）同步到服务器 `/data/xuziyi/cylinder_vortex_pipeline/outputs/`，原始 nc 按需放 `/data/xuziyi/cfd_raw/`。
+  判据：目标 Python/torch/CUDA 可导入，`server/self_check.py` 能加载 memmap，路径与缓存均位于 `/data/xuziyi/`。
+- **阶段 5 训练**：服务器上先做短冒烟，再按实测显存选择 `CUDA_VISIBLE_DEVICES`、`data_parallel`、`amp`、`num_workers`；默认单卡、AMP 关闭。每 epoch checkpoint，`--resume auto` 跨 SSH 会话恢复，不再受会话时限或手工分块约束。
+  判据：多数据集线 130 epoch 完成，test F1/IoU 记录，checkpoint 归档；单数据集线仍保留 200 epoch 配置。最终权重已归档于 `outputs/_ckpt130/train_multi/`。
 - **阶段 6 推理评估**：TTA 滑窗推理 → 投影 → 对比图+动画+弱定量表。
   判据：满足 §3 验收标准 1、3、4。
 - **阶段 7 整理**：结果目录、复现 README、参数表、checkpoint 归档。
@@ -166,18 +170,23 @@ cylinder_vortex_pipeline/
 | t_scale | 0.25 | KNN 时空混合度量中 t 的权重 |
 | IVD 阈值 τ | **0.6539 / 0.6512 / 0.6113**（train/val/test，**85 分位**逐时间片；单数据集 abs 划分） | 票 07 延伸：p95（3.3272/3.16848/3.14344）弱标签相比论文 Fig.6 列 1 捕获稀疏（正格 4.8%）→ τ 下探至 **p85**（正格 14.8%、5×5 过滤后 9.8 连通块/帧；多阈值敏感性表 `outputs/weak_labels/multi_tau/multi_tau_stats.json`：p90=9.9%/p80=19.7%）。**多数据集 τ 逐数据集各自**（§2 盘点表：boussinesq 0.0555、cylinder2d 0.0545、doublegyre 0.0022、duffing 0.006、fourcenters 0.024、jung 0.2189、pipedcylinder2d frac 片 0.6408/0.6526） |
 | 最小涡面积 | 5×5 | 连通域过滤（票 07 延伸实测：过滤删的是 <9 格小碎片而非大涡结构，p85 下 ma9 与 ma25 覆盖差仅 0.15%，保留） |
-| epoch 样本数 | **20000**（50% 正样本） | 2026-08-25 票 07 步速校准回写：T4×2 实测 ~5s/步（DP+全精度）→ 40000×200 epoch≈110h 超预算 4×；降半 + TF32 → 预计 35~55h；下限 20000 不变 |
+| epoch 样本数 | **20000**（50% 正样本） | 服务器默认值；按 GPU 显存和实际步速调整 |
 | 时间划分 | abs：10 / 12.5 / 15 s（**仅 1501 帧×dt=0.01 适用**）；**多数据集 frac：各数据集帧前 60% 训 / 后 40% 测（无 val，逐数据集各自）** | train/val/test 无时间泄漏（守护测试）；frac 口径（fraction_slices）对帧数/时长各异的数据集通用（§2 盘点——jung t 从 1.107 起，绝对秒数不通用） |
 | 多数据集池 | roots = **6 个** `outputs/datasets/<名>/dataset`（config/pathline_transformer_multi.yaml；**2026-08-29 duffing 移出**，原 7） | τ 与归一化逐数据集各自（各 meta ivd μ/σ、speed_max）；50% 过采样、t_scale 0.25 等与单数据集同参；留出评估 `--report-f1 --f1-split test`；**结算口径 130 epoch**（2026-08-29 用户决策，原 200） |
 | TTA 次数 | 5 | 平均随机 PSL 采样的概率 |
+| 服务器执行默认 | `CUDA_VISIBLE_DEVICES=0`、`data_parallel=false`、`amp=false`、`num_workers=8` | SHU-server 40 CPU 核、4×RTX 3090 共享环境；先 `nvidia-smi` 选择空闲卡，竞争时 worker 降至 4 或更低 |
 
 ## 7. 风险与预案
 
 | 风险 | 预案 |
 |---|---|
 | 弱标签阈值敏感/循环评估 | 多阈值敏感性报告（**已交付**：multi_tau_report + 统计表/目检图，票 07 延伸）；定性为主；备选 Q-criterion 标签对照 |
-| **T4×2 显存与速度约束（票 07 实测）** | batch 100 单卡前向 13.5GB > 16GB → **DP 默认开**（每卡 50 ≈6.8GB，等效 batch 100）；**AMP 默认关**（上游 `propagate_features` 原地 index-put Half/Float 冲突——迁移忠实性不改 vendor；如需半精度先修 vendor 独立小票）；**TF32 开**（训练界标准，1.5~2×）；实测 ~5s/步 → samples_per_epoch 20000（§6 已回写）+ 20000 时每 epoch 200 步 |
-| Kaggle 配额/12h 会话 | 分块+每 epoch checkpoint+Dataset 版本续训；DataParallel/AMP/降样本数 |
+| **共享 RTX 3090 显存与 GPU 选择** | SHU-server 实测 4×24 GiB，但多人共享；每次先 `nvidia-smi`，默认 `CUDA_VISIBLE_DEVICES=0`、`data_parallel=false`，仅在明确预留多卡时启用 DataParallel；batch/worker 按实测调整 |
+| AMP 与上游算子兼容性 | **AMP 默认关闭**（`propagate_features` 原地 index-put 存在 Half/Float 冲突；迁移忠实性不改 vendor）；如需半精度，先在目标服务器做数值回归验证 |
+| 服务器存储与缓存 | 根分区已满；代码、输出、日志、临时和 pip/matplotlib 缓存统一放 `/data/xuziyi/`，不要写 `/tmp` 或 `/home` |
+| SSH 会话中断 | 每 epoch checkpoint + `--resume auto`；重新连接后重复训练命令即可恢复 |
+| 本地/服务器数据同步 | outputs 被 gitignore；用 PowerShell `scp`/服务器 `rsync` 同步 `outputs/datasets`，上传后检查 `multi_meta.json` 和文件数量 |
+| ffmpeg 不可用 | 评估自动保留 PNG 序列或回退 GIF；数值结果不受影响 |
 | 正负样本不平衡 | 50% 过采样；必要时 BCE pos_weight |
 | 涡特征微弱 | τ 下探（**已执行**：p95→p85，§6）；T_win 24→48 |
 | 迹线撞固体 | 掩膜截断+重播种；冒烟目检 |
@@ -197,7 +206,7 @@ cylinder_vortex_pipeline/
 
 ## 9. 工作流（新会话如何推进）
 
-**前置检查**：`to-spec`/`to-tickets` 依赖 issue tracker 与 triage 标签配置（`docs/agents/issue-tracker.md` 等）。✅ 已配置（2026-08-25）：**Local markdown** 追踪器（`.scratch/<feature-slug>/`：spec.md + `issues/NN-<slug>.md` 一票一文件，五默认 triage 标签），详见 `docs/agents/issue-tracker.md`、`docs/agents/triage-labels.md`。代码托管 GitHub：`ziyixu317-wq/2d-vortex-extraction-260825`（Kaggle 训练从该仓库克隆；数据集仍走 Kaggle Dataset）。
+**前置检查**：`to-spec`/`to-tickets` 依赖 issue tracker 与 triage 标签配置（`docs/agents/issue-tracker.md` 等）。✅ 已配置（2026-08-25）：**Local markdown** 追踪器（`.scratch/<feature-slug>/`：spec.md + `issues/NN-<slug>.md` 一票一文件，五默认 triage 标签），详见 `docs/agents/issue-tracker.md`、`docs/agents/triage-labels.md`。代码托管 GitHub：`ziyixu317-wq/2d-vortex-extraction-260825`；当前通过 VS Code Remote-SSH 在 `/data/xuziyi/cylinder_vortex_pipeline` clone/fetch，数据由本地 E 盘同步到服务器 `outputs/`。
 
 **主线（ask-matt 多会话构建分支）**：
 1. 完整阅读本 HANDOFF 文档；若某节与代码现实冲突，以代码为准并在 §11 记一条修正。
@@ -205,9 +214,11 @@ cylinder_vortex_pipeline/
 3. 调用 `/to-tickets`：把规格拆成 tracer-bullet 垂直切片，每票声明阻塞边；向用户确认颗粒度与依赖边后再发布（local 方案 = `.scratch/<slug>/issues/NN-<slug>.md`，从 01 按依赖序编号）。
 4. 之后逐票 `/implement`（每票新上下文，内部走 `/tdd` + `/code-review`），按 frontier 顺序（阻塞边全完成者优先）。
 
+**当前交付执行**：代码迁移到 `E:\codex\AI CFD\cylinder_vortex_pipeline` 后，在 Remote-SSH 终端执行 `server/self_check.py`、`train_kaggle.py`、`evaluate.py`；训练数据使用 `outputs/datasets/` memmap。服务器环境、同步命令和默认 GPU 策略见 `server/README.md`。每次变更后在本地 E 盘运行全量 pytest，再提交 git；用户在普通终端推送 GitHub。
+
 **上下文卫生（ask-matt）**：从开始到 `/to-tickets` 完成保持同一未断窗口（不 /clear、不 /compact）；若接近智能区（~150k tokens），在最近的阶段边界 /compact 而非中途。
 
-**用户故事素材（to-spec 扩写起点）**：作为流场分析者，我想对任意 2D 非定常仿真场得到逐迹线涡概率并投影成网格图；我想在本地 CPU 快速验证迹线提取与标签正确性；我想在 Kaggle 分块训练并在会话中断后无损恢复；我想拿到与 IVD/Q 参考并排的对比图与动画；我想对新数据集用一条命令生成掩膜并接入训练。
+**用户故事素材（to-spec 扩写起点）**：作为流场分析者，我想对任意 2D 非定常仿真场得到逐迹线涡概率并投影成网格图；我想在本地 CPU 快速验证迹线提取与标签正确性；我想通过 VS Code Remote-SSH 在服务器训练，并在 SSH 会话中断后用 checkpoint 无损恢复；我想拿到与 IVD/Q 参考并排的对比图与动画；我想对新数据集用一条命令生成掩膜并接入训练。
 
 ## 10. Suggested skills
 
@@ -283,3 +294,19 @@ AMP（独立小票，改迁移忠实性）——目标 <20h 需 A100 级硬件�
   自用户 Kaggle 快照 `results (2).zip` 提取至 `outputs/_ckpt130/train_multi/`（epoch 129/130、
   train_loss 0.0797——此前 §11 票 07“已解压本地”目录被清空，现恢复）。未决：无（最终展示帧
   复核/多数据集正式定格表归用户）。
+- 2026-09-01 **迁移 E 盘 + 冗余清理 + 改 SSH Remote 执行**：完整复制项目（含 `.git`）至
+  `E:\codex\AI CFD\cylinder_vortex_pipeline`，原始 nc 至 `E:\codex\AI CFD\CFD数据集`；源/目标
+  文件清单与 SHA-256 全部一致，git 历史保留。按用户确认的清单删除 `outputs/` 诊断、临时、旧模型、
+  测试数据和旧预览，并删除已被本文件取代的根 `工作计划_迹线Transformer涡提取.md`；保留
+  `outputs/datasets/`、`datasets_new/`、`_ckpt130/` 及 evaluation/tau/weak-label 交付产物。
+  将 `outputs/infer_cavity2d.yaml` 归档为 `config/pathline_transformer_cavity_eval.yaml`，新增
+  `server/README.md`、`server/self_check.py`、`server/preview_eval.py`；`kaggle/` 工件标记为历史兼容，
+  Notebook 已移除，当前流程改为 VS Code Remote-SSH 服务器 clone/fetch、文件同步、训练和评估。
+  SHU-server 已核实 Python 3.12.14、PyTorch 2.7.1+cu118、CUDA 11.8、4×RTX 3090，依赖已装入
+  `/data/xuziyi/envs/xuziyi`；无 ffmpeg，动画沿用 GIF/PNG 回退。E 盘全量测试在迁移后基线为
+  **240 passed**。还差：用户在普通终端推送本地 commit，并按 `server/README.md` 将 memmap 同步到服务器；
+  服务器正式训练前仍需依据 `nvidia-smi` 选择空闲 GPU 并复核资源参数。补充验证：服务器隔离工作区
+  全量 pytest **229 passed, 11 skipped**（跳过项仅因测试内置本机 Windows nc 路径）；`compileall`、
+  核心模块导入、全部 CLI `--help` 与训练 checkpoint/resume 冒烟均通过；上传单个
+  `pipedcylinder2d` memmap 后，GPU 0 上 `server/self_check.py --n-samples 2` 通过，真实一帧
+  `evaluate.py --tta 1 --display-frames 1300` 完成（F1=0.6566、IoU=0.4888）。

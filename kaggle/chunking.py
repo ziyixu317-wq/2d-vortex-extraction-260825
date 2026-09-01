@@ -1,6 +1,8 @@
-"""Kaggle 分块训练规划（07 票）：12h 会话硬上限 → 每块 ≤ 会话预算。
+"""历史 Kaggle 分块规划（deprecated）。
 
-领域词汇（HANDOFF §5/§7 与规格，唯一权威）：
+服务器执行不受 Kaggle 会话时限约束；模块仅为旧快照和历史测试保留。
+
+领域词汇（HANDOFF §5/§7 与规格，唯一权威；历史口径）：
 - Kaggle 会话 12h 硬上限 → 训练分块 ≤8h（HANDOFF §5：块尾打包为 Kaggle Dataset
   新版本，下次会话 `--resume auto` 从 latest checkpoint 无损伤恢复）；
 - train_kaggle.py 的 `--epochs` 为块目标（覆盖 config 的 total；resume 从

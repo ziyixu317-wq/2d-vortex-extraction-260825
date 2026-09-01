@@ -1,10 +1,13 @@
-"""训练脚本（train_kaggle.py）——06 票：自写训练循环（不依赖参考仓库任何训练代码）。
+"""迹线 Transformer 训练脚本（历史文件名 train_kaggle.py）。
+
+当前执行环境是 VS Code Remote-SSH 连接的 Linux 服务器；文件名因既有
+checkpoint/配置兼容性而保留，不表示仍需 Kaggle。
 
 领域词汇（HANDOFF §2/§6，唯一权威）：
 - 训练超参（论文附录 C）：AdamW(wd 1e-6)、lr 1e-4、TwoStep 调度（warmup 60 epoch
   维持 lr → 5e-6，两段常数阶梯）、batch 100、200 epoch、梯度裁剪 1.0、BCE 损失；
-- 每 epoch 存 checkpoint（含 optimizer 状态）支持断点续训（Kaggle 12h 会话硬上限）；
-- 可选 DataParallel/AMP（Kaggle T4×2 单机；本地 CPU 无 CUDA 不启用）；
+- 每 epoch 存 checkpoint（含 optimizer 状态）支持跨 SSH 会话断点续训；
+- 可选 DataParallel/AMP（按服务器实际 GPU 配置；本地 CPU 无 CUDA 不启用）；
 - 全部超参走 YAML 配置（config/pathline_transformer_cylinder.yaml）；
 - 数据集 = dataset.WeakLabelPathlineDataset：set_epoch(epoch) 重建 50% 正样本
   过采样序（同 (seed, epoch) 确定性 → 断点续训的采样序与中断前逐样本一致）；
@@ -34,12 +37,10 @@ DEFAULT_CONFIG_PATH = "config/pathline_transformer_cylinder.yaml"
 
 
 def enable_tf32():
-    """启用 TF32 matmul/卷积（T4 tensor core 加速，数值仍为 fp32 语义）。
+    """启用 Ampere 及更新架构的 TF32 matmul/卷积（数值仍为 fp32 语义）。
 
-    2026-08-25 票 07 步速校准：T4×2 全精度实测 ~5s/步（上游 KNN 暴力 O(N²) +
-    DP 同步 + T4 fp32 无张量核加速；torch 2.10 默认 allow_tf32=False），
-    启用 TF32 预期 1.5~2×。训练界标准做法（matmul 尾数 10 位，收敛行为
-    与 fp32 一致）；论文口径的可复现性不受影响（同环境确定性一致）。
+    训练界标准做法（matmul 尾数 10 位，收敛行为与 fp32 一致）；论文口径的
+    可复现性不受影响（同环境确定性一致）。
     """
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
@@ -127,7 +128,7 @@ def _make_dataset(data_cfg, split):
         delta_frac=float(data_cfg.get("delta_frac", ds.DEFAULT_DELTA_FRAC)),
         L=int(data_cfg.get("L", ds.DEFAULT_L)),
         n_substeps=int(data_cfg.get("n_substeps", 4)))
-    root = data_cfg.get("root", "outputs/dataset")
+    root = data_cfg.get("root", "outputs/datasets/pipedcylinder2d/dataset")
     if isinstance(root, (list, tuple)):
         return ds.MultiDatasetPathlineDataset(list(root), split=split, **common)
     return ds.WeakLabelPathlineDataset(root, split=split, **common)
@@ -164,7 +165,7 @@ def run_epoch(model, loader, criterion, optimizer, device, grad_clip=1.0,
     """一个 epoch（或 max_steps 步）的训练：前向 → BCE → 反向 → 梯度裁剪 → step。
 
     返回平均 loss（标量 float）。梯度裁剪按 HANDOFF（grad_clip 默认 1.0）。
-    AMP（scaler 非 None 且 cuda）时走 autocast + scaler.scale/step（Kaggle 可选）。
+    AMP（scaler 非 None 且 cuda）时走 autocast + scaler.scale/step（服务器按实测显式开启）。
     """
     model.train()
     use_amp = scaler is not None and device.type == "cuda"
@@ -239,7 +240,7 @@ def evaluate_f1(model, loader, device, threshold=0.5, max_steps=None):
 # --------------------------------------------------------------------------- checkpoint（断点续训）
 
 def _strip_module_prefix(state_dict):
-    """DataParallel 保存的 'module.' 前缀归一化（Kaggle T4×2 启用 DP 后仍可续训）。"""
+    """DataParallel 保存的 ``module.`` 前缀归一化，保证多卡与单卡可互续训。"""
     keys = list(state_dict.keys())
     if keys and all(k.startswith("module.") for k in keys):
         return {k[len("module."):]: v for k, v in state_dict.items()}
@@ -250,7 +251,7 @@ def save_ckpt(path, model, optimizer=None, scheduler=None, epoch=0, metrics=None
               config=None):
     """保存 checkpoint：model + optimizer（含动量状态）+ scheduler + epoch 元数据。
 
-    path 为文件路径（Kaggle 每 epoch 落盘；run_name_ckpt_latest.pth 命名由调用方）。
+    path 为文件路径（服务器每 epoch 落盘；run_name_ckpt_latest.pth 命名由调用方）。
     """
     path = pathlib.Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -306,9 +307,9 @@ def _make_loader(dataset, batch_size, num_workers, device, shuffle=False):
 def main(argv=None):
     """训练入口：YAML 配置驱动全部超参；--resume 默认自动续训（latest checkpoint）。
 
-    Kaggle 分块流程（HANDOFF §5）：每 epoch 更新 latest（含 optimizer 状态）+
-    save_freq 里程碑快照；块尾打包 Dataset 新版本 → 下次会话 --resume auto 无损伤恢复。
-    CPU 冒烟：--max-steps 1~2 + 小样本数（本地验证训练循环）。
+    每 epoch 更新 latest（含 optimizer 状态）并按 save_freq 保存里程碑；
+    服务器会话结束后使用 --resume auto 从 latest 无损恢复。CPU 冒烟用
+    --max-steps 1~2 + 小样本数验证训练循环。
     """
     ap = argparse.ArgumentParser(
         description="迹线 Transformer 涡提取训练（TwoStep 调度/每 epoch checkpoint/"
@@ -318,14 +319,14 @@ def main(argv=None):
                     help="续训 checkpoint 路径；'auto'=ckpt_dir/run_name_ckpt_latest.pth"
                          "（存在则续）；'none'=从零开始")
     ap.add_argument("--epochs", type=int, default=None,
-                    help="覆盖 train.epochs（Kaggle 分块 ≤8h 用）")
+                    help="覆盖 train.epochs（服务器调试或分段运行时使用）")
     ap.add_argument("--max-steps", type=int, default=None,
                     help="每 epoch 最多训练步数（CPU 冒烟 1~2 步用）")
     ap.add_argument("--report-f1", action="store_true",
                     help="训练完成后记录自然分布 F1/IoU（val_f1.json，票 07 验收 4）")
     ap.add_argument("--f1-split", default=None,
                     help="F1/IoU 记录的时间片名（默认 val_split；多数据集 60/40 "
-                         "无 val 时传 test——对留出 40% 跨数据集 test 片推理，票 07 延伸）")
+                         "无 val 时传 test——对留出 40%% 跨数据集 test 片推理，票 07 延伸）")
     args = ap.parse_args(argv)
 
     config = load_config(args.config)
@@ -333,7 +334,7 @@ def main(argv=None):
     if args.epochs is not None:
         train_cfg["epochs"] = int(args.epochs)
     set_random_seed(int(train_cfg.get("seed", 0)))
-    enable_tf32()                 # T4 tensor core 加速（num 语义仍 fp32；见 enable_tf32 docstring）
+    enable_tf32()                 # Ampere/更新架构可用；数值语义仍为 fp32
     device = _resolve_device(train_cfg.get("device", "auto"))
 
     # ---- 模型/损失/优化器/调度
@@ -383,7 +384,7 @@ def main(argv=None):
         elif str(resume).lower() != "auto":
             raise FileNotFoundError(f"续训 checkpoint 不存在: {path}")
 
-    # ---- 可选 DataParallel（Kaggle T4×2）
+    # ---- 可选 DataParallel（仅在用户明确分配多张服务器 GPU 时启用）
     if bool(train_cfg.get("data_parallel")) and torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
         print(f"[train] DataParallel 已启用 ({torch.cuda.device_count()} GPU)")
