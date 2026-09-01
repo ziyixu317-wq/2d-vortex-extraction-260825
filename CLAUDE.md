@@ -4,6 +4,8 @@
 
 **唯一权威上下文是 `HANDOFF.md`**：新会话先完整阅读它（已拍板决策、已核实事实、阶段计划、参数、风险、工作流与更新协议全部在其中），按 §9 工作流推进，按 §11 协议维护。
 
+阶段 0 已完成。当前 B1/W1/W2/W3 弱监督扩展的持续交接、冻结决策、未决问题以及新会话的 `to-spec` → `to-tickets` 入口见 `HANDOFF.md` §12；不要把旧 `.scratch/vortex-extraction-pipeline/` 基线规格误当成新任务。
+
 - 工作语言：中文；领域词汇以 HANDOFF.md 为准。
 - 参考仓库 `PyflowVis-main`（本机只读参考，不在本仓库内；不直接依赖）。
 - 代码托管：https://github.com/ziyixu317-wq/2d-vortex-extraction-260825。

@@ -30,7 +30,7 @@ cylinder_vortex_pipeline/
 
 ## 依赖与服务器环境
 
-依赖仅限 `torch`、`numpy`、`h5py`、`PyYAML`（import 名 `yaml`）、`matplotlib`、`tqdm`。本地可用 CPU 环境运行测试；服务器已核实 Python 3.12.14、PyTorch 2.7.1+cu118、CUDA 11.8、4×RTX 3090 24 GiB。服务器为共享环境，运行前用 `nvidia-smi` 选择空闲卡；默认 `CUDA_VISIBLE_DEVICES=0`、`data_parallel: false`、`amp: false`、`num_workers: 8`，资源竞争时降低 worker 数。根分区已满，缓存统一放 `/data/xuziyi/`。
+基线依赖为 `torch`、`numpy`、`h5py`、`PyYAML`（import 名 `yaml`）、`matplotlib`、`tqdm`；弱监督 Haller-IVD 扩展允许新增 `scipy` 与 `scikit-image`。本地可用 CPU 环境运行测试；服务器已核实 Python 3.12.14、PyTorch 2.7.1+cu118、CUDA 11.8、4×RTX 3090 24 GiB。服务器为共享环境，运行前用 `nvidia-smi` 选择空闲卡；默认 `CUDA_VISIBLE_DEVICES=0`、`data_parallel: false`、`amp: false`、`num_workers: 8`，资源竞争时降低 worker 数。根分区已满，缓存统一放 `/data/xuziyi/`。弱监督扩展的交接与实施入口见 [`HANDOFF.md` §12](HANDOFF.md#12-b1w1w2w3-弱监督持续交接阶段-0-已完成)。
 
 ## 最短复现路径（Remote-SSH）
 
