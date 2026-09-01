@@ -17,7 +17,7 @@ def _jung_like_grid():
 def test_batched_edge_fringe_mask_lookup_no_oob():
     """域上缘半格内（out_ok）位置的掩膜索引须裁剪（回归守护）。
 
-    Kaggle 多数据集训练实测崩溃：jung 网格非整跨度（span/dy = 199.0000628），
+    多数据集训练实测暴露的边缘网格问题：jung 网格非整跨度（span/dy = 199.0000628），
     上缘半格内位置映射索引 j == Y → 批式积分 m2[j, i] IndexError（size 200）；
     标量 mask_at 有越界前置（返回 False）不崩，批式缺该守护。
     """

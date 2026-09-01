@@ -6,7 +6,7 @@
 - AdamW(wd 1e-6)、lr 1e-4、batch 100、200 epoch、梯度裁剪 1.0、BCE 损失；
 - 每 epoch 存 checkpoint（含 optimizer 状态）；断点续训从 checkpoint['epoch']+1 恢复；
 - 全部超参走 YAML 配置（config/pathline_transformer_cylinder.yaml）；
-- CPU 冒烟：1~2 步训练 loss 数值有限且形状正确（下降趋势为 Kaggle 全量观察项）。
+- CPU 冒烟：1~2 步训练 loss 数值有限且形状正确（下降趋势为服务器全量训练观察项）。
 
 期望值来源（独立于实现）：HANDOFF §2 训练超参字面量（论文附录 C）、
 HANDOFF §6 参数表、规格 Implementation Decisions。
@@ -350,7 +350,7 @@ class TestMainCLI:
     """验收 1/3 的 CLI 层证据：真实主循环 1 epoch 冒烟 + 断点续训从恢复 epoch 继续。
 
     数据/超参全部来自（临时）YAML（验收 4 的集成面）；合成场无 val 片 →
-    main 跳过 val（防御路径，Kaggle 数据完整）。
+    main 跳过 val（防御路径，数据片未提供验证区间）。
     """
 
     @staticmethod
@@ -393,7 +393,7 @@ class TestMainCLI:
         assert np.isfinite(blob2["metrics"]["train_loss"])
 
     def test_deterministic_seed_reproducibility(self, synth_root, tmp_path):
-        """同 seed + 同配置两次运行 → 首 epoch 损失一致（可复现冒烟；Kaggle 观察项）。"""
+        """同 seed + 同配置两次运行 → 首 epoch 损失一致（可复现冒烟）。"""
         from train_kaggle import load_config, main
         losses = []
         for tag in ("a", "b"):

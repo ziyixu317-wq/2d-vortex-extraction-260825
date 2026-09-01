@@ -1,14 +1,14 @@
-"""07 票：Kaggle 训练支撑（val F1 记录 / 分块规划 / Dataset A 打包）测试。
+"""07 票：训练收尾与兼容接口（F1 记录 / 分块规划 / 归档组装）测试。
 
 领域词汇（HANDOFF §2/§5/§6/§7 与规格 Implementation Decisions，唯一权威）：
 - 票 07 验收 4：最终 checkpoint 归档（含 optimizer 状态）、val F1 记录；
 - 自然分布 val 评估口径：正负比例 = val 池比例（非训练同款 50% 平衡；平衡采样
   是训练监控口径，自然分布才是模型真实精度的观察口径——票 06 已注释明示
   「自然分布精度评估归票 08 弱定量表」，此处仅为训练收尾的 val F1 记录）；
-- Kaggle 分块：12h 会话硬上限 → 每块 ≤8h（预留自检/打包），每 epoch checkpoint
-  + --resume auto 跨会话断点续训（票 07 What to build）；
-- Dataset A = nc 数据文件 + prepare_dataset 产物（meta.json + memmap)，
-  随 Kaggle Dataset 上传（票 05 产物，gitignore 不走 GitHub）；
+- 分块规划：按预算生成 epoch 分块，每 epoch checkpoint + --resume auto
+  跨会话断点续训；
+- 归档组装：nc 数据文件 + prepare_dataset 产物（meta.json + memmap），
+  生成 manifest 与可选 zip；
 - mock 模型 forward 返回常量概率 → 混淆矩阵手算字面量（独立来源，不重算实现路径）。
 
 合成数据工具复用 test_dataset.py（同目录同包；Rankine 涡场 + prepare_dataset）。
@@ -250,10 +250,10 @@ class TestSetEpochNatural:
         assert len(order) == d.samples_per_epoch
 
 
-# ================================================================ 切片 D：分块规划（kaggle/chunking.py）
+# ================================================================ 切片 D：分块规划兼容接口（kaggle/chunking.py）
 
 class TestPlanChunks:
-    """Kaggle 分块规划：12h 会话硬上限 → 每块 ≤8h（预留自检/打包），跨会话续训。
+    """按预算规划 epoch 分块并支持跨会话续训。
 
     期望值来源：手算字面量（200 epoch ÷ 每块上限 → 块序列；不通过实现公式重算）。
     """
@@ -346,7 +346,7 @@ class TestPlanChunks:
             pick_bench_source(str(bad), str(tmp_path / "none.json"))
 
 
-# ================================================================ 切片 E：Dataset A 打包（kaggle/prepare_dataset_a.py）
+# ================================================================ 切片 E：归档组装（kaggle/prepare_dataset_a.py）
 
 def make_fake_dataset_dir(root):
     """人造 prepare_dataset 产物目录：meta.json + u/v/ivd/label/mask（随机字节内容）。"""
@@ -361,7 +361,7 @@ def make_fake_dataset_dir(root):
 
 
 class TestBuildDatasetA:
-    """Kaggle Dataset A 组装：nc + prepare_dataset 产物 + manifest（审计/自检）。"""
+    """nc + prepare_dataset 产物 + manifest 组装（审计/自检）。"""
 
     def test_layout_and_content_integrity(self, tmp_path):
         """输出结构 = nc + dataset/（逐字节一致）+ manifest（sha256 引用同一来源）。"""
@@ -383,7 +383,7 @@ class TestBuildDatasetA:
             assert dst.exists()
             assert hashlib.sha256(dst.read_bytes()).hexdigest() == \
                 hashlib.sha256(src.read_bytes()).hexdigest()
-        # manifest 自洽：每条记录的文件存在且哈希匹配（可作 Kaggle 端自检清单）
+        # manifest 自洽：每条记录的文件存在且哈希匹配
         m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         assert m["files"]
         for f in m["files"]:
@@ -413,7 +413,7 @@ class TestBuildDatasetA:
         assert any(f["path"] == "aux/ivd_q_t400.png" for f in manifest["files"])
 
     def test_zip_roundtrip(self, tmp_path):
-        """zip 模式：成员路径与内容与目录版逐字节一致（Kaggle 网页可直接上传 zip）。"""
+        """zip 模式：成员路径与内容与目录版逐字节一致。"""
         import hashlib
         import zipfile
         from kaggle.prepare_dataset_a import build_dataset_a, make_zip
@@ -488,10 +488,10 @@ class TestBuildDatasetA:
             pa_main(["--nc", "a.nc", "b.nc", "--dataset-dir", "ds1", "--out", "x"])
 
 
-# ================================================================ 切片 I：挂载布局探测（kaggle/mount_probe.py，票 07 延伸运行反馈）
+# ================================================================ 切片 I：输入布局探测（kaggle/mount_probe.py）
 
 class TestMountProbe:
-    """Dataset A 挂载布局探测（Kaggle 多级嵌套 /kaggle/input/datasets/<owner>/<slug>/）。
+    """嵌套输入目录布局探测（多级 datasets/<owner>/<slug> 结构）。
 
     票 07 三期实测：挂载 = {root}/datasets/<owner>/<slug>/...（多级嵌套）；本切片
     用 tmp 树复现嵌套与浅层两种布局，守护 probe_layout 深度优先命中。
@@ -505,7 +505,7 @@ class TestMountProbe:
             encoding="utf-8")
 
     def test_nested_multi_layout(self, tmp_path):
-        """Kaggle 嵌套挂载：root/datasets/ziyixu317/dataset-a-multi/{data,datasets/<名>/dataset}。"""
+        """嵌套多数据集目录：root/datasets/<owner>/<slug>/{data,datasets/<名>/dataset}。"""
         from kaggle.mount_probe import probe_layout
         mount = tmp_path / "datasets" / "ziyixu317" / "dataset-a-multi"
         (mount / "data").mkdir(parents=True)
@@ -519,7 +519,7 @@ class TestMountProbe:
         assert single is None
 
     def test_nested_single_layout(self, tmp_path):
-        """Kaggle 嵌套单数据集：root/datasets/owner/2d-.../{<nc>,dataset/meta.json}。"""
+        """嵌套单数据集目录：root/datasets/<owner>/<slug>/{<nc>,dataset/meta.json}。"""
         from kaggle.mount_probe import probe_layout
         mount = tmp_path / "datasets" / "ziyixu317" / "2d-unsteady-cylinder"
         (mount / "dataset").mkdir(parents=True)
@@ -544,13 +544,12 @@ class TestMountProbe:
         assert probe_layout(str(tmp_path)) == (None, None)
 
 
-# ================================================================ 切片 F：Notebook 环境自检（kaggle/self_check.py）
+# ================================================================ 切片 F：环境自检（kaggle/self_check.py）
 
 class TestSelfCheck:
-    """验收 1（Notebook 环境 import vendor + 数据加载通过）的本地可验证实现。
+    """验收 1（import vendor + 数据加载通过）的本地可验证实现。
 
-    Kaggle 端真实运行 = 用户执行（README §运行）；此处验证模块在任意
-    数据目录上返回正确的检查结论（合成数据，CPU）。
+    此处验证模块在任意数据目录上返回正确的检查结论（合成数据，CPU）。
     """
 
     def test_self_check_all_passes(self, tmp_path):

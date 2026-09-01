@@ -1,15 +1,15 @@
-"""历史自检实现（deprecated Kaggle 入口）。
+"""数据与模型自检的兼容实现。
 
-服务器请使用 ``python server/self_check.py``；此模块保留同一检查实现以兼容旧测试。
+服务器请使用 ``python server/self_check.py``；此模块保留同一检查实现以兼容既有测试。
 
 领域词汇（HANDOFF §4/§5 与规格，唯一权威）：
-- 验收 1：服务器环境 import vendor + 数据加载通过（本模块保留历史实现，
-  当前入口为 ``server/self_check.py``）；
+- 验收 1：服务器环境 import vendor + 数据加载通过（当前入口为
+  ``server/self_check.py``）；
 - 模型缝：迹线样本 (B, L=16, K=256, C=7) → 每迹线涡概率 (B, 256)、域 (0,1)（sigmoid）；
 - 数据加载：WeakLabelPathlineDataset on-the-fly（set_epoch 后取 n_samples）；
   样本有限无 NaN、标签 0/1（弱标签口径）。
 
-兼容用法：python kaggle/self_check.py --data-root outputs/datasets/pipedcylinder2d/dataset
+兼容用法：python server/self_check.py --data-root outputs/datasets/pipedcylinder2d/dataset
       [--config config/pathline_transformer_cylinder.yaml] [--device cpu]
 """
 
@@ -19,7 +19,7 @@ import argparse
 import sys
 from pathlib import Path
 
-# CLI 入口（python kaggle/self_check.py）从任意 cwd 运行时也能 import 项目模块
+# CLI 入口从任意 cwd 运行时也能 import 项目模块
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -93,7 +93,7 @@ def self_check(data_root, config_path=None, device="cpu", n_samples=4,
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="历史环境自检（服务器请使用 server/self_check.py）")
+    ap = argparse.ArgumentParser(description="服务器数据与模型环境自检")
     ap.add_argument("--data-root", default="outputs/datasets/pipedcylinder2d/dataset",
                     help="服务器上的逐数据集 memmap 目录")
     ap.add_argument("--config", default=None, help="生产 YAML 配置路径（默认不读）")

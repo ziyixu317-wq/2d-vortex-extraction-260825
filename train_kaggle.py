@@ -1,11 +1,11 @@
-"""迹线 Transformer 训练脚本（历史文件名 train_kaggle.py）。
+"""迹线 Transformer 服务器训练入口（文件名沿用既有配置/断点约定）。
 
-当前执行环境是 VS Code Remote-SSH 连接的 Linux 服务器；文件名因既有
-checkpoint/配置兼容性而保留，不表示仍需 Kaggle。
+当前执行环境是 VS Code Remote-SSH 连接的 Linux 服务器；脚本从 YAML 读取
+单数据集或多数据集训练配置，并提供逐 epoch checkpoint 与跨会话续训。
 
 领域词汇（HANDOFF §2/§6，唯一权威）：
-- 训练超参（论文附录 C）：AdamW(wd 1e-6)、lr 1e-4、TwoStep 调度（warmup 60 epoch
-  维持 lr → 5e-6，两段常数阶梯）、batch 100、200 epoch、梯度裁剪 1.0、BCE 损失；
+- 训练超参（论文附录 C 的工程化实现）：AdamW(wd 1e-6)、lr 1e-4、TwoStep 调度
+  （warmup 60 epoch 维持 lr → 5e-6，两段常数阶梯）、batch 100、梯度裁剪 1.0、BCE 损失；
 - 每 epoch 存 checkpoint（含 optimizer 状态）支持跨 SSH 会话断点续训；
 - 可选 DataParallel/AMP（按服务器实际 GPU 配置；本地 CPU 无 CUDA 不启用）；
 - 全部超参走 YAML 配置（config/pathline_transformer_cylinder.yaml）；
@@ -394,7 +394,7 @@ def main(argv=None):
     val_freq = int(train_cfg.get("val_freq", 5))
     save_freq = int(train_cfg.get("save_freq", 30))
     use_amp = bool(train_cfg.get("amp")) and device.type == "cuda"
-    # torch.amp.GradScaler('cuda')：2.10 起 cuda.amp.GradScaler 为 deprecated API（警告）；
+    # torch.amp.GradScaler('cuda')：2.10 起旧 cuda.amp.GradScaler 接口会产生兼容性警告；
     # 本地 CPU 路径 enabled=False 构造无害
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_amp else None
     for epoch in range(start_epoch, int(train_cfg["epochs"])):

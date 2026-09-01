@@ -1,12 +1,8 @@
-"""历史 Kaggle 分块规划（deprecated）。
+"""断点续训的分块规划兼容接口。
 
-服务器执行不受 Kaggle 会话时限约束；模块仅为旧快照和历史测试保留。
-
-领域词汇（HANDOFF §5/§7 与规格，唯一权威；历史口径）：
-- Kaggle 会话 12h 硬上限 → 训练分块 ≤8h（HANDOFF §5：块尾打包为 Kaggle Dataset
-  新版本，下次会话 `--resume auto` 从 latest checkpoint 无损伤恢复）；
-- train_kaggle.py 的 `--epochs` 为块目标（覆盖 config 的 total；resume 从
-  checkpoint['epoch']+1 续到目标）→ 本模块只需规划「每块跑多少 epoch」。
+``plan_chunks`` 根据总 epoch、单 epoch 步速和预算生成分块序列，
+``pick_bench_source`` 选择当前或已恢复的步速基准；两者供既有测试和快照格式使用。
+服务器常规训练直接依靠逐 epoch checkpoint 与 ``--resume auto``。
 """
 
 from __future__ import annotations
@@ -16,12 +12,9 @@ import os
 
 
 def pick_bench_source(new_path, restored_path):
-    """步速基准来源选择：本会话实测 → 上个会话还原（随 checkpoint 数据集打包）。
+    """选择当前或已恢复的步速基准，返回 ``(来源路径, bench dict)``。
 
-    Kaggle Save Version 每个版本是全新工作区：首会话实测写 outputs/bench_info.json；
-    cell 7 块尾打包时复制到 outputs/train/（随 checkpoint 数据集发布/下载）→ 下会话
-    cell 3 还原 → 复用（省 ~18min 重复校准）。返回 (来源路径, bench dict)；
-    两者皆不存在时返回 (None, None)（调用方跑校准）。
+    两个候选路径都不存在时返回 ``(None, None)``，由调用方执行首次校准。
     """
     for p in (str(new_path), str(restored_path)):
         if os.path.exists(p):

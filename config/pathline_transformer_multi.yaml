@@ -12,8 +12,7 @@
 #   `--report-f1 --f1-split test`（跨数据集 test 片自然分布 F1/IoU 记录）；
 # - τ/归一化逐数据集各自（各 meta 的 p85 分位 τ、ivd μ/σ、speed_max）；
 # - run_name/ckpt_dir 独立（与单数据集训练产物不混写）；
-# - **结算口径 130 epoch**（2026-08-29 用户决策：43-86 loss 已趋稳（0.0873→
-#   0.0811），86 续跑 44 → 130 结算，原 200 中止——HANDOFF §11）。
+# - **结算口径 130 epoch**（HANDOFF §1/§6；最终 checkpoint 归档于 outputs/_ckpt130）。
 #
 # 服务器用法（Remote-SSH 终端）：
 #   CUDA_VISIBLE_DEVICES=0 python train_kaggle.py \
@@ -64,7 +63,7 @@ model:
 
 # ---------------------------------------------------------------------------- 训练
 train:
-  epochs: 130                     # 2026-08-29 用户决策：130 结算（原 200 中止；见头注释）
+  epochs: 130                     # 多数据集联合线结算口径
   lr: 0.0001
   weight_decay: 0.000001
   warmup_epochs: 60

@@ -1,7 +1,7 @@
 """服务器环境自检入口。
 
 自检验证 vendor 模型前向、数据集 memmap 可读性以及 7 通道迹线样本的有限性。
-实现暂复用历史模块以保持行为与 checkpoint 兼容；服务器执行请使用本入口。
+实现复用兼容层以保持既有行为与 checkpoint 兼容；服务器执行请使用本入口。
 
 用法：
     python server/self_check.py --config config/pathline_transformer_multi.yaml \

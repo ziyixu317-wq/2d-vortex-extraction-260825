@@ -1,15 +1,9 @@
-"""历史 Kaggle Dataset A 打包器（deprecated）。
+"""memmap 归档与 manifest 组装的兼容工具。
 
-服务器直接同步 ``outputs/datasets/``，不再执行 Dataset 打包或上传；本模块仅为旧
-快照兼容与历史测试保留。
+工具复制原始 nc、预处理 memmap 和辅助图，生成逐文件 SHA-256 清单，并可创建 zip；
+服务器日常使用本地文件同步，既有测试和快照仍可调用本接口。
 
-领域词汇（HANDOFF §4/§5 与规格，唯一权威）：
-- Dataset A = nc 数据文件 + 预处理产物（票 05 prepare_dataset 的 meta.json +
-  u/v/ivd/label/mask memmap ≈1.3GB；gitignore 不走 GitHub，随 Kaggle Dataset 上传）；
-- Kaggle 训练从 GitHub 克隆代码（Dataset B 概念由 git clone 承担，HANDOFF §9）；
-- manifest.json：逐文件 sha256 + 大小（Kaggle 端自检/审计清单；notebook 自检 cell 引用）。
-
-用法（本地，用户终端或本脚本）：
+用法（本地终端）：
     python kaggle/prepare_dataset_a.py --nc "CFD数据集/pipedcylinder2d.nc" \
         --dataset-dir outputs/dataset --out kaggle_dataset_a [--zip]
 """
@@ -34,14 +28,14 @@ def _sha256_file(path):
 
 
 def build_dataset_a_multi(pairs, out_dir, include_nc=True):
-    """多数据集 Dataset A 组装（票 07 延伸：7 数据集联合训练）。
+    """多数据集归档组装（每个元素为 ``(nc 路径, memmap 目录)``）。
 
     pairs = [(nc 路径, prepare_dataset 产物目录), ...]（一一对应，调用方保证
     配对顺序）。布局：
       <out>/data/<nc 文件名>          各数据集原始 nc（include_nc=False 时省略——
-                                          Kaggle 训练只用 memmap，nc 仅为重算来源）
+                                          训练只用 memmap，nc 仅为重算来源）
       <out>/datasets/<目录名>/ ...    各 prepare_dataset 产物（meta.json + memmap）
-    manifest.json 与单数据集同构（逐文件 sha256，Kaggle 端自检清单）。
+    manifest.json 与单数据集同构（逐文件 sha256）。
     返回 manifest dict。
     """
     out_dir = pathlib.Path(out_dir)
@@ -88,7 +82,7 @@ def build_dataset_a_multi(pairs, out_dir, include_nc=True):
 
 
 def build_dataset_a(nc_path, dataset_dir, out_dir, aux_dirs=None):
-    """组装 Dataset A 目录 → manifest dict（逐文件 shasum，可作 Kaggle 端自检清单）。
+    """组装归档目录 → manifest dict（逐文件 shasum）。
 
     布局：<out>/pipedcylinder2d.nc + <out>/dataset/（prepare_dataset 产物整目录）
     + <out>/aux/（aux_dirs 提供的 .png 目检图，体积小、供后台诊断）。
@@ -98,7 +92,7 @@ def build_dataset_a(nc_path, dataset_dir, out_dir, aux_dirs=None):
     out_dir.mkdir(parents=True, exist_ok=True)
     files = []           # (相对路径, 绝对路径)
 
-    # ---- nc 原始数据（Kaggle 端万一重算的原始来源；保留文件名）
+    # ---- nc 原始数据（需要重算时的来源；保留文件名）
     nc_path = pathlib.Path(nc_path)
     nc_dst = out_dir / nc_path.name
     if not nc_path.exists():
@@ -142,7 +136,7 @@ def build_dataset_a(nc_path, dataset_dir, out_dir, aux_dirs=None):
 
 
 def make_zip(out_dir, zip_path):
-    """目录 → zip（Kaggle 网页/API 上传用；成员相对路径与目录布局一致）。"""
+    """目录 → zip（成员相对路径与目录布局一致）。"""
     out_dir = pathlib.Path(out_dir)
     zip_path = pathlib.Path(zip_path)
     zip_path.parent.mkdir(parents=True, exist_ok=True)
@@ -155,7 +149,7 @@ def make_zip(out_dir, zip_path):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Kaggle Dataset A 打包：nc + prepare_dataset 产物 → 上传目录/zip"
+        description="memmap 归档：nc + prepare_dataset 产物 → 目录/zip"
                     "（多数据集：--nc/--dataset-dir 可各传多个，一一对应）")
     ap.add_argument("--nc", nargs="+", required=True,
                     help="nc 数据文件路径（h5py 直读，支持中文路径；多个 = 多数据集）")
@@ -165,7 +159,7 @@ def main(argv=None):
     ap.add_argument("--aux-dirs", nargs="*", default=None,
                     help="可选 aux 目录（仅单数据集：weak_labels 目检图，只复制 .png）")
     ap.add_argument("--skip-nc", action="store_true",
-                    help="多数据集打包省略原始 nc（Kaggle 训练只用 memmap；"
+                    help="多数据集归档省略原始 nc（训练只用 memmap；"
                          "省 ~3.6GB 磁盘/上传体积，nc 仅为重算来源）")
     ap.add_argument("--zip", action="store_true", help="额外打包 zip")
     args = ap.parse_args(argv)
@@ -184,7 +178,7 @@ def main(argv=None):
             raise ValueError("多数据集打包不支持 --aux-dirs（aux 图放各数据集目录内）")
         manifest = build_dataset_a_multi(list(zip(args.nc, args.dataset_dir)),
                                          args.out, include_nc=not args.skip_nc)
-    print(f"Dataset A 已组装: {args.out}")
+    print(f"归档已组装: {args.out}")
     print(f"  文件数 = {len(manifest['files'])}  总大小 = "
           f"{manifest['total_bytes'] / 1e6:.1f} MB")
     if args.zip:

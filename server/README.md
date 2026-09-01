@@ -1,6 +1,6 @@
 # VS Code Remote-SSH 服务器执行手册
 
-本项目当前的训练、评估与预览均在 VS Code 的 Remote-SSH 终端中执行。`kaggle/` 目录仅保留历史兼容代码和旧测试接口；不再需要 Kaggle Dataset、Notebook、上传/挂载或 12 小时会话分块。
+本项目的训练、评估与预览均在 VS Code 的 Remote-SSH 终端中执行；代码入口、数据同步和资源参数统一按本手册操作。
 
 ## 服务器与目录
 
@@ -97,7 +97,7 @@ PY
 
 默认配置针对单卡运行：`CUDA_VISIBLE_DEVICES=0`、`data_parallel: false`、`amp: false`、`num_workers: 8`。若 GPU 0 被占用，应先根据 `nvidia-smi` 选择空闲卡并同步修改可见设备；只有明确预留多张卡时才启用 `data_parallel: true`。AMP 保持关闭，除非在目标服务器上完成数值回归验证。CPU 负载竞争时可将 `num_workers` 降到 4 或更低。
 
-训练命令（文件名 `train_kaggle.py` 为历史兼容，当前不依赖 Kaggle）：
+训练命令（入口文件名沿用既有配置与 checkpoint 约定）：
 
 ```bash
 export CUDA_VISIBLE_DEVICES=0
@@ -144,4 +144,4 @@ export CUDA_VISIBLE_DEVICES=0
 
 - `HANDOFF.md`：唯一权威上下文、参数、风险和变更日志。
 - `README.md`：项目概览和最短复现路径。
-- `kaggle/README.md`：历史 Kaggle 工件处置说明；当前执行以本手册为准。
+- `kaggle/`：兼容接口；当前执行入口以本手册为准。

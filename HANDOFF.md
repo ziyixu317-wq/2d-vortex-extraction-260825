@@ -2,7 +2,6 @@
 
 > 本文档是项目的**唯一权威上下文（单一事实来源）**。任何新会话接手本项目时：先完整阅读本文档，再按 §9 工作流推进。
 > 维护协议见 §11：事实变化时直接改正文对应小节，并在 §11 追加变更日志条目；不要把过程叙述堆进正文。
-> 历史文件 `工作计划_迹线Transformer涡提取.md` 已被本文档取代，仅作考古用，以本文档为准。
 
 ---
 
@@ -20,7 +19,7 @@
 
 1. **训练标签**：直接用 IVD/Q-criterion 阈值给仿真数据打**弱标注**（标签 = 迹线种子点处 IVD ≥ τ）。**不走** Vatistas 参数拟合/合成数据管线。
 2. **模型**：论文主体的迹线 Transformer，**从头训练**；不使用仓库预训练权重与 demo 验证集（早期 GPU 实验已确认模型可用）。
-3. **训练**：当前通过 VS Code Remote-SSH 在服务器执行，多数据集联合线按 **130 epoch** 结算；每 epoch checkpoint，`--resume auto` 跨 SSH 会话续训。服务器实测为 4×RTX 3090 24 GiB，默认只使用 `CUDA_VISIBLE_DEVICES` 指定的空闲单卡、`data_parallel=false`、`amp=false`；本地 CPU 只做测试和冒烟。Kaggle 流程仅作历史记录，不再是执行前提。单数据集线（暂缓）仍保留 200 epoch 配置。
+3. **训练**：当前通过 VS Code Remote-SSH 在服务器执行，多数据集联合线按 **130 epoch** 结算；每 epoch checkpoint，`--resume auto` 跨 SSH 会话续训。服务器实测为 4×RTX 3090 24 GiB，默认只使用 `CUDA_VISIBLE_DEVICES` 指定的空闲单卡、`data_parallel=false`、`amp=false`；本地 CPU 只做测试和冒烟。单数据集线（暂缓）仍保留 200 epoch 配置。
 4. **评估**：定性对比（IVD/Q-criterion 为参考）+ 弱定量表；不涉及 Vatistas 验证集。
 5. **不做 ivd 遮除消融**：IVD 是公认高精度涡判据，模型学习其近似是可接受且预期的。
 6. **迹线口径 = 256 条**：64 组 × 4 卫星点（不含中心），`KpathlinePerGroup=4`，对齐论文与发布数据。
@@ -120,17 +119,16 @@ cylinder_vortex_pipeline/
 ├── weak_labels.py               # IVD（5×5 局部邻域均值）+ Q-criterion + 阈值标签 + 多阈值敏感性报告
 ├── dataset.py                   # WeakLabelPathlineDataset（h5py+memmap，on-the-fly）+ _DatasetStore/MultiDatasetPathlineDataset（多数据集联合池，票 07 延伸）
 ├── prepare_multi.py             # 多数据集逐数据集预处理驱动（geometry→IVD/label/τ→memmap+meta，票 07 延伸）
-├── train_kaggle.py              # 历史文件名；服务器训练脚本（TwoStep、断点续训、可选 DataParallel/AMP、--report-f1）
+├── train_kaggle.py              # 服务器训练脚本（沿用既有文件名；TwoStep、断点续训、可选 DataParallel/AMP、--report-f1）
 ├── evaluate.py                  # TTA 推理、网格投影、对比图/动画、弱定量表
 ├── server/                      # Remote-SSH 自检/预览入口与服务器执行手册
-├── kaggle/                      # 历史 Kaggle 兼容代码（已废弃，不是当前执行路径）
+├── kaggle/                      # 兼容模块（供既有测试与快照使用）
 ├── config/pathline_transformer_cylinder.yaml  # 单数据集训练配置
 ├── config/pathline_transformer_multi.yaml     # 多数据集联合训练配置（票 07 延伸）
 ├── config/pathline_transformer_cavity_eval.yaml # cavity2d_re1000 严格零样本评估配置
 ├── CLAUDE.md                   # agent 入口说明（唯一权威仍是本文件）
 ├── docs/agents/                # ask-matt 配置：issue-tracker.md / triage-labels.md / domain.md
 ├── HANDOFF.md                   # 本文件
-└── NEW_SESSION_PROMPT.md        # 新会话启动 prompt
 ```
 
 各模块职责（实现时逐条落实）：
@@ -138,7 +136,7 @@ cylinder_vortex_pipeline/
 - **extractor.py**：全局场积分（允许迹线离开 patch）；种子落固体 → 重播种（仿 C++ `JittorReSeeding`）；迹线入固体 → 截断并重复末点（不引入 -1000 毒值）；位置按 patch 归一化到 [-1,1]（可超界）。
 - **weak_labels.py**：中心差分 ω=∂v/∂x−∂u/∂y，IVD=|ω−5×5 邻域均值|；标签 = IVD(种子,t0)≥τ + 5×5 最小面积连通域过滤；固体区 IVD=0。
 - **dataset.py**：单数据集支持 abs 时间片，多数据集使用 frac（各数据集前 60% 训练、后 40% 测试，无泄漏）；patch 32×32 stride 16，窗口默认 T_win=24 帧、起点步长 4 帧（严格零样本 cavity 配置单独使用 16 帧）；每 epoch 默认 20000 样本、50% 正样本过采样；u,v 与预计算 IVD 存 memmap；返回 `((dummy_field, pathlines), labels)` 匹配模型输入；正样本 = patch 内存在 ≥1 条涡迹线。
-- **train_kaggle.py**：不 import 原仓库 train.py；文件名为历史兼容，当前在 Remote-SSH 服务器运行；TwoStep（warmup 60 epoch @1e-4 → 5e-6）；梯度裁剪 1.0；每 epoch 存 checkpoint（含 optimizer 状态）；batch 100；`--resume auto` 跨 SSH 会话续训。
+- **train_kaggle.py**：不 import 原仓库 train.py；在 Remote-SSH 服务器运行；TwoStep（warmup 60 epoch @1e-4 → 5e-6）；梯度裁剪 1.0；每 epoch 存 checkpoint（含 optimizer 状态）；batch 100；`--resume auto` 跨 SSH 会话续训。
 - **evaluate.py**：滑窗推理（stride 16 全场覆盖 + 贴边补全）→ TTA 5 次平均 → 网格投影（累积+计数平均消 patch 重叠）；展示帧模型概率面板用滑窗 prob_sw（patch 归一化与训练一致——加密种子 dense 全场归一化会分布偏移致输出退化，保留为独立工具+单测）；对比图（模型/IVD/Q/速度模+弱标签等值线）→ mp4 动画（ffmpeg 缺失回退 gif）+ 弱定量表（F1/IoU、标签参考与模型预测涡面积占比、帧间连续性）+ **τ 敏感性评估（票 09：`--tau-sensitivity` 复用推理重标 → τ × 指标表 + 报告）**；底图用速度模场（不依赖 LIC 渲染器）。
 
 ## 5. 阶段计划（每阶段有完成判据）
@@ -310,3 +308,9 @@ AMP（独立小票，改迁移忠实性）——目标 <20h 需 A100 级硬件�
   核心模块导入、全部 CLI `--help` 与训练 checkpoint/resume 冒烟均通过；上传单个
   `pipedcylinder2d` memmap 后，GPU 0 上 `server/self_check.py --n-samples 2` 通过，真实一帧
   `evaluate.py --tta 1 --display-frames 1300` 完成（F1=0.6566、IoU=0.4888）。
+- 2026-09-01 **no-negative-echo 收尾复核**：按当前 Remote-SSH 执行状态清理 README、服务器手册、
+  agent 入口、issue-tracker 与规格中的旧流程措辞，统一已定参数（τ=p85、epoch 样本数=20000、
+  多数据集 130 epoch、滑窗概率展示）；移除 HANDOFF 目录树中不存在的 `NEW_SESSION_PROMPT.md` 条目。
+  保留 `kaggle/` 兼容模块、既有测试和 `.scratch/issues/` 历史审计内容，因为它们仍承载兼容接口、
+  回归覆盖或决策证据；未发现新的可安全删除交付文件。按用户要求未重跑全量测试，仅完成 diff、路径、
+  缓存和输出白名单静态核验。

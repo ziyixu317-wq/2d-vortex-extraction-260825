@@ -20,6 +20,6 @@ Read the file at the referenced path. The user will normally pass the path or th
 
 ## 代码托管与迁移备注
 
-代码托管于 GitHub：https://github.com/ziyixu317-wq/2d-vortex-extraction-260825 （Kaggle 训练从该仓库克隆，数据集仍走 Kaggle Dataset，不进 GitHub）。
+代码托管于 GitHub：https://github.com/ziyixu317-wq/2d-vortex-extraction-260825；服务器工作区从该仓库 clone/fetch，预处理 memmap 通过本地 E 盘同步到服务器，不进 GitHub。
 
 **Issue 追踪保持本地 markdown**（本文件），与代码托管解耦。若日后改用 GitHub Issues 作为追踪器：重跑 `/setup-matt-pocock-skills` 切换（需要 `gh` CLI 与认证），切换前本配置保持有效。

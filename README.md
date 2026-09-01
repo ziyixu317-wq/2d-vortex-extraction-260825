@@ -4,7 +4,7 @@
 
 ## 当前执行方式
 
-代码在本地 E 盘维护，并通过 VS Code Remote-SSH 在 `SHU-server` 上训练、评估和生成预览；不再使用 Kaggle Notebook、Dataset 上传/挂载或 12 小时会话分块。服务器执行细节见 [`server/README.md`](server/README.md)，`kaggle/` 仅保留历史兼容代码和测试接口。
+代码在本地 E 盘维护，通过 VS Code Remote-SSH 在 `SHU-server` 上训练、评估和生成预览；服务器执行细节见 [`server/README.md`](server/README.md)。
 
 本地工作区：`E:\codex\AI CFD\cylinder_vortex_pipeline`
 服务器工作区：`/data/xuziyi/cylinder_vortex_pipeline`
@@ -16,11 +16,11 @@
 cylinder_vortex_pipeline/
 ├── geometry.py / extractor.py / weak_labels.py / dataset.py  # 预处理、迹线与弱标签
 ├── prepare_multi.py                                          # 多数据集 memmap 预处理
-├── train_kaggle.py                                            # 历史文件名；当前在 SSH 服务器训练
+├── train_kaggle.py                                            # 服务器训练入口（保留既有文件名以兼容配置/断点）
 ├── evaluate.py                                                # 推理、投影、τ 敏感性
 ├── config/                                                    # multi、cylinder 与 cavity 评估配置
 ├── server/                                                    # Remote-SSH 自检、预览与执行手册
-├── kaggle/                                                    # 已废弃的 Kaggle 兼容工件
+├── kaggle/                                                    # 兼容接口（仅供既有测试与快照）
 ├── outputs/datasets/                                          # 训练/评估数据（不入 git）
 ├── outputs/_ckpt130/train_multi/                              # 130 epoch 最终权重与指标
 ├── tests/                                                     # pytest 验收测试
@@ -117,6 +117,6 @@ python -m pytest tests -q
 
 - [`HANDOFF.md`](HANDOFF.md)：决策、已核实事实、参数、风险、工作流和变更日志。
 - [`server/README.md`](server/README.md)：Remote-SSH 服务器准备、同步、训练和评估手册。
-- [`kaggle/README.md`](kaggle/README.md)：历史 Kaggle 工件处置说明（当前流程不依赖）。
+- `kaggle/`：兼容接口；日常执行入口见 [`server/README.md`](server/README.md)。
 - [`.scratch/vortex-extraction-pipeline/spec.md`](.scratch/vortex-extraction-pipeline/spec.md) 与 [`issues/`](.scratch/vortex-extraction-pipeline/issues/)：规格和票据上下文。
 - [`CLAUDE.md`](CLAUDE.md)：agent 入口和文档导航。

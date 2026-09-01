@@ -1,18 +1,7 @@
-"""历史 Kaggle Dataset 挂载布局探测（deprecated）。
+"""输入目录布局探测的兼容接口。
 
-服务器使用固定的 ``/data/xuziyi/cylinder_vortex_pipeline`` 工作区，不需要挂载探测；
-本模块仅为旧快照兼容与历史测试保留。
-
-领域词汇（HANDOFF §2 / 票 07 三期与延伸，唯一权威）：
-- Kaggle Add Input 的挂载结构 = `{root}/datasets/<owner>/<slug>/...`（多级嵌套，
-  含 slug 多级目录——三期实测 `datasets/ziyixu317/2d-...`）；Dataset A zip 上传后
-  Kaggle 自动解压，布局原样保留：
-    * 单数据集：`<挂载根>/<nc>` + `<挂载根>/dataset/meta.json`
-    * 多数据集：`<挂载根>/data/<nc>` + `<挂载根>/datasets/<名>/dataset/meta.json`
-- probe_layout 返回挂载根（**含布局标志的最浅目录**）：单数据集根 或 多数据集根
-  （多优先——多布局内部的 `datasets/<名>` 子目录含 dataset/meta.json，若先判单
-  会误命中）；未命中返回 (None, None)（调用方走 zip 解压回退 / fail loud）。
-- 纯 pathlib 实现（不依赖挂载实际路径深度——本地测试用 tmp 树模拟 Kaggle 结构）。
+``probe_layout`` 识别单数据集和多数据集两种 ``dataset/meta.json`` 目录形态，
+供既有测试和快照读取嵌套归档；服务器正式工作区使用固定路径。
 """
 
 from __future__ import annotations
@@ -21,11 +10,9 @@ import pathlib
 
 
 def probe_layout(root="/kaggle/input"):
-    """按布局标志定位挂载根 → (single_root, multi_root)（含多级嵌套挂载）。
+    """按布局标志定位输入根 → ``(single_root, multi_root)``。
 
-    扫描范围 = root 自身 + 全部子目录（深度优先，浅层先命中）；判据：
-    - 多数据集：目录下有 datasets/<名>/dataset/meta.json（至少一个数据集）；
-    - 单数据集：目录下有 dataset/meta.json（仅在无多数据集命中的情况下判定）。
+    扫描范围为 root 自身及全部子目录（浅层先命中）；多数据集布局优先于单数据集布局。
     """
     root = pathlib.Path(root)
     dirs = [root] + sorted((d for d in root.rglob("*") if d.is_dir()),

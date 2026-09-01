@@ -1,14 +1,16 @@
-# 07: Kaggle 上传与 200 epoch 训练
+# 07: Remote-SSH 服务器训练与 130 epoch 结算
 
-**What to build:** 在 Kaggle 完成全量训练：Dataset A = nc 数据文件、Dataset B = pipeline 代码目录；Notebook 安装依赖（h5py/yaml/matplotlib/tqdm）后可 import vendor 并加载数据；先 1 epoch 实测步速校准每 epoch 样本数；按 Kaggle 12h 会话上限分块（≤8h）训练 200 epoch，每 epoch checkpoint、跨会话断点续训（块尾打包为 Kaggle Dataset 新版本）；最终 checkpoint 归档、val F1 记录。超预算时启用 DataParallel/AMP/降样本数。
+**What to build:** 在 VS Code Remote-SSH 服务器完成多数据集训练：使用 `outputs/datasets/` memmap，先做模型/数据自检，再按服务器显存选择单卡或多卡；每 epoch 保存 checkpoint，SSH 会话中断后用 `--resume auto` 续训；完成 130 epoch 结算并记录 test P/R/F1/IoU。
 
 **Blocked by:** 06
 
 **Status:** done（2026-08-29 多数据集线 130 epoch 结算完成；单数据集线暂缓）
 
-**交付物 vs 执行边界**（agent 交付完成 → 用户 Kaggle 执行 → 回填后勾选并改 done）：
-- 交付：`kaggle/` 全部（Notebook/打包/分块/自检/手册）、`train_kaggle.py --report-f1`、`dataset.set_epoch_natural`、`tests/test_kaggle.py`（20 项，全量 151 passed）
-- 用户执行：Kaggle 端 `Run All`（首会话自检 → 步速实测 → 分块训练）；`kaggle/README.md` §0-6 逐步指引与回填清单
+**当前执行说明**：服务器入口为 `server/self_check.py`、`train_kaggle.py` 和 `evaluate.py`；memmap 通过本地 E 盘同步。下方验收记录保留早期实现与决策证据，供回溯，不作为当前操作步骤。
+
+**交付内容**：`train_kaggle.py --report-f1`、逐 epoch checkpoint/`--resume auto`、多数据集采样与评估、兼容接口及回归测试。
+
+## 验收记录（实现与决策审计）
 
 - [x] Notebook 环境 import vendor + 数据加载通过（**交付**：self_check.py 已本地真实验证——生产模型前向 (1,256) 域 (0,1)、4 样本 (16,256,7) 有限无 NaN；**执行**：用户首会话 cell 4，失败 raise）
 - [x] 1 epoch 实测步速，epoch 样本数校准后回写参数表（**交付**：notebook 块 5 自动基准+总时长预算检查+超预算自动生成 train_opt.yaml（AMP/DataParallel/降样本至下限 20000）+回填提示；**执行**：用户 Kaggle 实测 627.8 s/epoch（3.0 s/步），回写 HANDOFF §6）
@@ -66,4 +68,3 @@
 - **用户决策 1（结算标准 + 结算指标）**：200→**130 epoch**（43-86 loss 已趋稳；config `train.epochs=130`，86 续跑 44；最后一块自动 `--report-f1 --f1-split test`）；**结算指标 = test 片自然分布 Precision/Recall/F1**（阈值 0.5、IoU 附带记录，用户 2026-08-29 定）。
 - **用户决策 2（数据质量）**：**forceddampedduffing2d 移出训练池**（roots 7→6；**问题实证 2026-08-29**：文件无结构缺陷——netCDF4/h5py 读写正常、与参考数据集逐字段同构；ParaView 打开显示 1×1×1 退化网格 + `vtkPVImageSliceMapper: Incorrect dimensionality` = ParaView reader 路径问题（被当 Image 而非 rectilinear grid，非数据内容错误）；用户保持移出：常规复核工具不可用→可信度受损，且该数据集贡献最小（正格 8.3% 最低）；详见 HANDOFF §2 注记。Kaggle Dataset A 无需重传）。
 - **已回填（2026-08-29，130 epoch 结算完成）**：`pathline_transformer_multi_test_f1.json` = **P=0.4967 / R=0.9549 / F1=0.6535**（IoU=0.4853；tp 844,308 / fp 855,629 / fn 39,855 / tn 3,380,208 / n=5,120,000；6 数据集联合 test 片自然分布、阈值 0.5）；checkpoint = `pathline_transformer_multi_ckpt_latest.pth` epoch=129（5.6MB，含 optimizer 状态）；步速 627.8 s/epoch（首块实测、跨会话复用）；train_loss 86→129 = 0.0811→0.0797（缓降）；分块会话数 = 4（0→43、43→86、86→129、129→130+结算）。**结算值解读**：P<0.5+R≈0.95 联合过分割——主因 boussinesq τ 跨片漂移（train 0.0555 vs test 0.5955，~10×）；86 epoch 逐数据集 100 样本评估印证（boussinesq P=0.305、cylinder2d P=0.572；其余 4 数据集 F1 0.88-0.96）。**缺口**：87-129 会话产物（E90/E120 里程碑 + 训练日志）未下载（latest=最终权重已拿到，里程碑非必需）。验收项 2/3/4 已勾选 → 票 Status = done。→ 票 08 正式评估（latest 权重在 `outputs/_ckpt130/`；cavity2d 作第 8 个严格零样本测试集；boussinesq τ 漂移在票 08 按数据集拆分声明或全局 τ 重标——用户决策）。
-

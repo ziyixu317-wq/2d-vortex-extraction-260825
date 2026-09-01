@@ -1,6 +1,6 @@
-"""历史单帧涡提取预览实现（deprecated Kaggle 入口）。
+"""单帧涡提取预览的兼容实现。
 
-服务器请使用 ``python server/preview_eval.py``；此模块保留同一实现以兼容旧测试。
+服务器请使用 ``python server/preview_eval.py``；此模块保留同一实现以兼容既有测试。
 
 领域词汇（HANDOFF §3/§4 与规格，唯一权威）：
 - 用途：加载 latest checkpoint → 指定帧的滑窗样本（patch stride 16 全场覆盖）→
@@ -8,11 +8,10 @@
   （累积 + 计数平均消除 patch 重叠，与票 08 规格同口径的简版）→ 三联图
   （模型概率场 / IVD / 弱标签）落盘。**非交付级评估**：单帧、单次/少次采样；
   定量表、动画、多帧目检属票 08 evaluate.py。
-- 中途模型（12h 会话分块前段）在此目检只用于「管线正确性检查」：
-  高概率区域应大致落在涡街/拐角回流区；边界毛糙、背景噪声属预期
-  （论文 200 epoch 全训的早期阶段）。
+- 快速预览用于管线正确性检查：高概率区域应大致落在涡街/拐角回流区；
+  交付级定量表、动画和多帧目检由 ``evaluate.py`` 生成。
 
-用法：python kaggle/preview_eval.py --config config/pathline_transformer_cylinder.yaml \
+用法：python server/preview_eval.py --config config/pathline_transformer_cylinder.yaml \
       --ckpt outputs/train/pathline_transformer_cylinder_ckpt_latest.pth \
       --frame 1300 --out outputs/evaluation_server/prob_vs_ivd_t1300.png [--tta 3] [--device cuda]
 """
@@ -23,7 +22,7 @@ import argparse
 import sys
 from pathlib import Path
 
-# CLI 入口（python kaggle/preview_eval.py）从任意 cwd 运行时也能 import 项目模块
+# CLI 入口从任意 cwd 运行时也能 import 项目模块
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -145,8 +144,8 @@ def run_preview(config_path, ckpt_path, frame, out_path, tta=1, device="cpu",
     mask2d = np.asarray(np.load(Path(root) / "mask.npy"), dtype=bool)
     prob[mask2d] = 0.0            # 固体区不显示（与弱标签口径一致）
 
-    # ---- 三联图（物理坐标 extent；与票 04 目检图同风格；标题用英文——
-    #      Kaggle/无中文字体环境下 DejaVu Sans 缺 CJK 字形会出豆腐块）
+    # ---- 三联图（物理坐标 extent；与票 04 目检图同风格；无中文字体环境下
+    #      DejaVu Sans 缺 CJK 字形会出豆腐块，标题使用英文）
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     xdim, ydim = np.asarray(store._xdim), np.asarray(store._ydim)

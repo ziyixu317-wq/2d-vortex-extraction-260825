@@ -7,7 +7,7 @@
 - 工作语言：中文；领域词汇以 HANDOFF.md 为准。
 - 参考仓库 `PyflowVis-main`（本机只读参考，不在本仓库内；不直接依赖）。
 - 代码托管：https://github.com/ziyixu317-wq/2d-vortex-extraction-260825。
-- 当前执行方式：本地 `E:\codex\AI CFD\cylinder_vortex_pipeline` 维护代码，通过 VS Code Remote-SSH 连接 `SHU-server`，在 `/data/xuziyi/cylinder_vortex_pipeline` 执行训练、评估和预览；不再使用 Kaggle Notebook/Dataset 流程。
+- 当前执行方式：本地 `E:\codex\AI CFD\cylinder_vortex_pipeline` 维护代码，通过 VS Code Remote-SSH 连接 `SHU-server`，在 `/data/xuziyi/cylinder_vortex_pipeline` 执行训练、评估和预览。
 - 服务器入口：先阅读 `server/README.md`，确认 `nvidia-smi`、`CUDA_VISIBLE_DEVICES`、`data_parallel`、`amp` 和 `num_workers` 与当前共享服务器资源一致。
 - 预处理数据：训练/评估读取 `outputs/datasets/<dataset>/dataset/` memmap；原始 nc 仅在服务器上重算预处理时使用。断点续训保留 `--resume auto` 和逐 epoch checkpoint。
 
