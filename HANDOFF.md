@@ -205,7 +205,7 @@ cylinder_vortex_pipeline/
 | 中文路径 | h5py 直读；建议另复制数据到 ASCII 路径（如 `C:\flowdata\`） |
 | **逐数据集结构验证盲点（2026-08-29 duffing 教训）** | 7 数据集盘点只覆盖统计量（shape/τ/正格），未逐数据集验证「时间演化 + 涡结构符合数据集官网」——duffing 实锤：512 帧时间冻结（max\|du\|=0）、IVD 全域常数（p75=p95=0.006）、标签正格全为域边界伪影，与官网 LIC/FTLE 双涡不符。**预案：新数据集接入前补体检**（帧差扫描 max\|du\| + ω/IVD 结构图 + 与官网示意对照；对既有 6 数据集同样补做——2026-08-29 已排程，见 §11） |
 | 上游 `.cuda()` 硬编码（票 01 迁移发现） | `vendor/DeepUtils/loss/build.py` SmoothCrossEntropy(ignore_index/weight) 分支与 `models/point_transformers.py` PosE_Initial 含 `.cuda()`，CPU-only 下启用会崩；当前 PathlineTransformerV0+BCELoss 路径不触碰。若未来启用须先去 cuda 化（作为独立小票处理，不改迁移忠实性） |
-| Haller-IVD 参考未完成本地文献核验 | 当前 Zotero 检索到 VortexTransformer 条目，但未检索到 Haller、Hadjighasem、Farazmand 与 Huhn (2016) 的精确条目；在用户补充条目、提供全文或明确允许外部来源前，Haller 公式与边界参数只能标为“待核实”，不得写成已由 Zotero 确认的事实。 |
+| Haller-IVD 文献证据边界 | 2026-09-01 Zotero 条目 `Defining coherent vortices objectively from the vorticity`（key `L2PX3NQX`）的本地全文已核对 IVD 公式与二维 Eulerian extraction 流程骨架；工程离散阈值与其 canonical 对应关系仍标为“待核实”，不得写成论文已确认参数。 |
 | physics anchor 与评价泄漏 | train 可生成 Haller anchor；calibration 只做开发选择；test Haller 标签只做最终逐数据集评价。数据接口须携带 split/来源元数据并在测试中断言，禁止把 test 标签或阈值回灌训练。 |
 | Haller 闭合轮廓离散不稳定 | 优先使用 scipy/scikit-image 的 contour、convex hull、形态学工具；先在合成 Rankine 与少量真实 train 帧做可视化/属性测试，再冻结参数并保存算法版本、参数哈希和失败计数。 |
 | 弱监督训练复现与 checkpoint 兼容 | 新 checkpoint 使用独立版本字段，保存 student/teacher/projection head、optimizer/scheduler、epoch、RNG、anchor 元数据哈希和 split 配置；旧 B0 checkpoint 仅允许显式 warm-start 辅助实验，不能混入主表。 |
@@ -245,7 +245,7 @@ cylinder_vortex_pipeline/
 
 ## 10. Suggested skills
 
-新会话应按序调用：`to-spec` → `to-tickets` → `implement`（内部 `tdd`、`code-review`）。本次弱监督交接还应遵循 `ask-matt` 的上下文卫生，并用 `writing-for-agents` 检查交接文档是否有清晰指针、完成判据和单一事实来源。词汇冲突/新概念时用 `domain-modeling`；遇到只有用户能完成的配置步骤用 `wizard`。若 tracker 未配置，先提示用户运行 `/setup-matt-pocock-skills`。涉及 Haller 原始论文时先查 Zotero；当前精确条目尚未找到，必须在用户补充条目/全文或明确允许外部来源前保持“待核实”状态。
+新会话应按序调用：`to-spec` → `to-tickets` → `implement`（内部 `tdd`、`code-review`）。本次弱监督交接还应遵循 `ask-matt` 的上下文卫生，并用 `writing-for-agents` 检查交接文档是否有清晰指针、完成判据和单一事实来源。词汇冲突/新概念时用 `domain-modeling`；遇到只有用户能完成的配置步骤用 `wizard`。若 tracker 未配置，先提示用户运行 `/setup-matt-pocock-skills`。涉及 Haller 原始论文时先查 Zotero；当前候选条目 `L2PX3NQX` 的本地全文已核对 IVD 公式与流程骨架，但工程阈值和 canonical 参数对应关系仍须保持“待核实”。
 
 ## 11. 变更日志（持续更新协议）
 
@@ -343,9 +343,208 @@ AMP（独立小票，改迁移忠实性）——目标 <20h 需 A100 级硬件�
   0–50/50–60/60–100 新 split、Haller train/test 隔离、pilot/final 预算、逐数据集与 macro 评价、
   W3 资源上限和 robustness GT 口径写入 §12；更新 §1/§3/§5/§6/§7/§8/§9/§10 的对应事实与接缝。
   新会话入口固定为 `/to-spec` → 用户确认 → `/to-tickets` → 用户确认 → 逐票 `/implement`；规划的
-  feature slug 为 `b1-w1-w2-w3-weak-supervision`，旧基线 spec/issues 保持不变。**还差**：Haller 2016
-  精确论文条目尚未在 Zotero 找到，需用户补充条目/全文或明确允许外部来源；Haller 参数、calibration
-  用途、final epoch、W2 gate 与 robustness 扰动留给规格阶段确认。
+   feature slug 为 `b1-w1-w2-w3-weak-supervision`，旧基线 spec/issues 保持不变。**还差**：Haller 2016
+   条目的全文/算法细节尚未在 Zotero 核实，需用户补充全文或明确允许外部来源；Haller 参数、calibration
+   用途、final epoch、W2 gate 与 robustness 扰动留给规格阶段确认。
+- 2026-09-01 **to-spec 完成（用户确认前）**：按指定技能、Zotero 门槛和 HANDOFF §8 完成模块边界探索，
+   新规格写入 `.scratch/b1-w1-w2-w3-weak-supervision/spec.md`（`ready-for-agent`）；覆盖三条扩展接缝、
+   端到端训练/评价主验收缝、Haller 参数候选、calibration 用途、final epoch、W2 gate、robustness
+   和主/辅助实验边界。Zotero 已返回候选条目 `L2PX3NQX`，但 Haller 算法细节仍标为“待核实”。
+   **还差**：用户确认规格接缝/参数/边界后才进入 `/to-tickets`；本次未创建票据、未改代码。
+ - 2026-09-01 **规格确认并进入 to-tickets 草拟**：用户确认 Haller 参数候选、calibration 允许用途、final
+    epoch、W2 gate、W3 cap、robustness 定义及主/辅助实验边界；新规格状态更新为已确认。当前只展示
+    blockers-first 票据颗粒度和依赖边，待用户确认后才正式创建新 issues 文件。
+ - 2026-09-01 **to-tickets 完成**：用户确认 11 张 blockers-first tracer-bullet 垂直票的颗粒度和依赖边；
+    新 issues 已逐票写入 `.scratch/b1-w1-w2-w3-weak-supervision/issues/01..11-*.md`，全部标为
+    `ready-for-agent`，包含 Title、What to build、Blocked by、验收标准和验证命令。关键边界为 01/02
+    可并行、B1 与 W1-P 可并行且 B1 不阻塞 W1、W2→W3 严格串联、09 为主端到端验收、10/11 分离 final
+    与 robustness。下一步：按 issue 路径逐票开启新上下文 `/implement`。
+- 2026-09-01 **票 01（split/label provenance contract）完成**：在不触及 vendor、旧
+  `.scratch/vortex-extraction-pipeline/` 和旧产物的前提下，新增 weak-supervision 的六数据集白名单、
+  0/50/60/100 半开 frame split、完整窗口 fail-loud guard、split/window/source/version/hash metadata、
+  train-only frozen normalization，以及 train/calibration/evaluation 的 Haller source 隔离；
+  `legacy_p85` 不进入非 legacy formal loss，weak test evaluation 必须显式声明
+  `evaluation_label_source='haller_gt_test'`。验证：票据 targeted 22 passed、旧 dataset/multidataset
+  命令 39 passed、prepare/train/kaggle/weak-label 相关回归 100 passed、临时可写目录 evaluate 回归
+  46 passed；仓库目录全量测试 255 passed/19 errors，错误均为既有 evaluate 夹具写入无权限的固定
+  `outputs/eval_*` 路径。Haller Zotero 全文已补充核对公式/流程骨架，但工程阈值 canonical 对应关系、
+  真实六数据集新产物和下游 B1/W1/W2/W3 仍待后续票据。
+- 2026-09-01 **票 02（Haller-IVD closed-contour anchor generator）完成**：新增
+  `haller_anchors.py` 与 `tests/test_haller_anchor.py`、`tests/test_haller_artifacts.py`，实现单帧
+  fluid-only standard IVD、8-neighborhood peaks、32 个 1.0→0.1 contour levels、闭合/solid/
+  convexity/perimeter 筛选、outermost 选择、interior/band union 三态分类，以及 train/calibration/test
+  source-specific artifact 保存与 fail-loud loader。正式 extractor 只使用冻结工程参数，不提供 override；
+  artifact metadata 写入 algorithm version、完整参数/parameter hash、输入/mask/数组 hash、coverage、
+  frame validity 和 failure count，Haller 文献状态保持 `pending_verification`（Zotero 候选
+  `L2PX3NQX`）。验证：票据原始命令分别为 7 passed 与 5 passed；最终 targeted 合计 15 passed，
+  `tests/test_weak_labels.py tests/test_geometry.py` 为 50 passed；真实 train frame 700 preview
+  成功，产物位于 `E:\codex\AI CFD\haller_preview_b1_ticket\pipedcylinder2d\frame700\`，
+  `valid=true`、341 peaks、109 contours、failure_count=0；逐候选 diagnostics 聚合后 metadata
+  约 8.1 MB（candidate evaluations 1,191,314、diagnostic records 22,582）。全量 pytest 记录为
+  255 passed/19 errors，
+  19 项均为既有 evaluate fixture 写入固定 `outputs/eval_*` 路径的 PermissionError，未修改 vendor、
+  旧 baseline 或下游票据；下一步按依赖图处理票 03，票 06 再接入 W1-H。
+- 2026-09-02 **票 03（shared method-mode/checkpoint contract）完成**：新增
+  `weak_supervision_contract.py` 与 `tests/test_weak_supervision_contract.py`，在 vendor 外部固定
+  B0/W1/W2/W3 的 7-channel 与 B1 raw 7→model 6 adapter/schema；batch 携带 masks、label/
+  sampling source、split 和 provenance，并对 train/calibration/test Haller 隔离、unknown label-only
+  loss、source-key/NumPy provenance 和 evaluation consumer 做 fail-loud 守护。新增带 mode/schema/
+  split/window/dataset/source/anchor hash/seed/RNG/optimizer/scheduler/teacher/projection 的
+  checkpoint 保存/恢复、contract hash、legacy/unknown-format/strict resume/inference guard；
+  `train_kaggle.py` 仅提供显式 mode-aware factory/contract checkpoint aliases，阶段 0 默认训练路径保持
+  不变，方法-specific 训练留给 WS-4～WS-10。验证：`python -m pytest tests/test_weak_supervision_contract.py -q`
+  （63 passed, 2 warnings）、`python -m pytest tests/test_vendor_migration.py -q`
+  （8 passed, 2 warnings）、相关回归（171 passed）、全量
+  `python -m pytest tests -q -p no:cacheprovider`（323 passed, 19 errors；均为既有
+  evaluate fixture 写入固定 `outputs/eval_test_ds`/`outputs/eval_tau_test_ds` 的 PermissionError）。
+  未修改 vendor/旧 baseline；还差 WS-4 B1 诊断训练、WS-5 W1-P、WS-6 W1-H、WS-7 W2、WS-8
+  W3 以及 WS-9/10 端到端与最终实验。
+ - 2026-09-02 **票 05（W1-P p90/p60/unknown teacher infrastructure）完成**：新增
+   `w1_p.py` 与 `tests/test_w1_p_infrastructure.py`，在现有 7-channel local-IVD seam 上固定
+   train-only p90/p60/unknown 三态 target、solid/unknown mask、masked anchor BCE、0.90/0.10
+   confident pseudo-label、student/EMA teacher（0.99）、consistency 和 12-epoch linear ramp；
+   `legacy_p85` 只作为显式 sampling source，formal loss/checkpoint source 固定为
+   `local_p90_p60`，并保存 W1-P config、split/source/schema 与 student/teacher/optimizer/
+   scheduler checkpoint metadata。验证：票据 targeted 6 passed，shared contract 63 passed，
+   相关回归 142 passed；最终全量 `python -m pytest tests -q -p no:cacheprovider` 为 337 passed、
+   19 个既有 evaluate fixture PermissionError；本票未修改
+   vendor、旧 baseline 或 B1/Haller 下游。下一步为票 06 W1-H，复用本票训练/teacher seam。
+ - 2026-09-02 **票 04（B1 diagnostic ablation）完成**：新增 `b1_diagnostic.py`、
+   `config/pathline_transformer_b1.yaml` 与 `tests/test_b1_ablation.py`，在 vendor 外部用
+   `ChannelSelectingAdapter` 将 raw 7-channel `[px,py,t,ivd,distance,u,v]` 选择为 model-facing
+   6-channel `[px,py,t,distance,u,v]`；训练显式绑定 new `weak_supervision` train split、
+   `legacy_p85`/percentile=85、train-only normalization、六数据集 scope 与独立
+   `b1_diagnostic` checkpoint/report，from-scratch 且禁止 Haller artifact 读取和旧 B0 warm-start。
+   TDD targeted：`python -m pytest tests/test_b1_ablation.py -q`（10 passed）、
+   `python -m pytest tests/test_weak_supervision_contract.py -q`（63 passed）；相关回归：
+   `tests/test_train.py tests/test_weak_supervision_split.py`（40 passed）、
+   `tests/test_dataset.py tests/test_prepare_multi.py`（32 passed）、vendor guard（8 passed）。
+   全量 `python -m pytest tests -q -p no:cacheprovider` 记录为 339 passed、19 个既有
+   evaluate fixture PermissionError；B1 与受影响回归无失败。对生产配置做只读六数据集 audit
+   时发现当前 `outputs/datasets/*/dataset/meta.json` 仍是历史 `frac` 产物，B1 按契约明确拒绝，
+   因而真实六数据集 pilot 还需先生成/挂载 `weak_supervision` 新 split 产物。未修改
+ vendor/旧 baseline/W1-W3 实现；下一步按依赖图进入票 06 W1-H，B1 仅作独立诊断不作为其前置。
+
+- 2026-09-02 **票 06（W1-H Haller physics-anchor integration）完成**：新增
+  `w1_h.py` 与 `tests/test_w1_h_integration.py`，将独立 `haller_anchor_train`
+  artifact 接入现有 7-channel、5×5 local-IVD window，保留 train-only source、
+  split/window、sampling、anchor hash 和 failure guard；batch 提供 Haller
+  known/unknown/solid/failed mask，formal loss 使用 masked anchor BCE，并复用
+  W1-P 的 EMA、pseudo-label、consistency 与 12-epoch ramp。checkpoint/log
+  写入 source、参数/input/mask hash、coverage、failure count、pseudo acceptance
+  和 teacher/student disagreement；Haller 文献状态继续为 `pending_verification`。
+  验证：票据 targeted `tests/test_w1_h_integration.py` 7 passed、
+  `tests/test_haller_anchor.py` 9 passed；相关回归 104 passed；完整
+  `python -m pytest -q` 为 346 passed、6 warnings、19 个既有 evaluate fixture
+  PermissionError（受保护的 `outputs/eval_test_ds` 与 `outputs/eval_tau_test_ds`）。
+  真实 train frame 700 artifact 只读 loader 与 5 epoch CPU smoke 成功（7-channel
+  pathline harness，`global_step=5`、loss finite、`loss_source=haller_anchor_train`；
+  source、frame、shape、failure_count、参数/input/mask hash 均通过）。还差新 weak split 六数据集的
+  artifact 生成/挂载及 WS-7/W2 下游实验；未修改 vendor、旧 baseline 或下游实现。
+
+- 2026-09-02 **弱监督票 07（W2 uncertainty-gated pseudo labels）完成**：新增
+  `w2.py` 与 `tests/test_w2_uncertainty_gate.py`，在 W1-H 的 7-channel、5×5
+  local-IVD pathline batch 上固定同一 EMA teacher 的 3 个显式可复现 stochastic
+  views，计算 probability mean、population predictive variance 与 Bernoulli
+  entropy；formal pseudo-label 只接受 `mean >= 0.90`/`<= 0.10` 且 variance 不超过
+  单一 global gate，entropy 只作诊断。calibration 仅合并 calibration Haller records
+  做全局 prediction threshold/variance gate 选择，拒绝 per-dataset gate、optimizer
+  更新和 test Haller/test-only metrics；test source 进入训练或选择路径均 fail loudly。
+  checkpoint 现在要求 W2 gate/view/acceptance/distribution/disagreement metrics、
+  global calibration policy 的 dataset/hash/candidate provenance，以及
+  Haller train anchor 的 algorithm/parameter/input/mask/failure metadata；load 后可
+  无显式 metrics 续训保存，并继续守护 mode/schema/split/window/source/hash。
+  验证：`tests/test_w2_uncertainty_gate.py` 15 passed；相关回归 138 passed；真实
+  `cylinder2d` 240 帧空间裁剪 + 正式 `t_win=24` split、真实 W1-H artifact、vendor
+  `PathlineTransformerV0` 的 5 epoch CPU smoke 通过（pathlines `(1,4,16,7)`、
+  `view_count=3`、gate `0.05`、loss finite、`global_step=5`）。全量
+  `python -m pytest -q` 为 361 passed、6 warnings、19 个既有 evaluator fixture
+  PermissionError（固定受保护的 `outputs/eval_test_ds` 与 `outputs/eval_tau_test_ds`，
+  非 W2 失败）。Haller 文献及工程参数 canonical 对应继续标记
+  `pending_verification`；未修改 vendor、旧 baseline、旧 spec/issues。下一步为票
+  08/WS-8 W3，仍需按依赖票生成/挂载各数据集正式 weak split/Haller artifacts。
+
+- 2026-09-02 **票 07 最终验证补强**：补上 W2 显式 split-contained window 与
+  `pathline_7ch`/5×5 local-IVD schema guard（含 W1-H collated windows），并将 shared
+  checkpoint load 固定为 CPU safe weights-only、拒绝不安全 pickle 回退、校验 CUDA RNG
+  device layout；W2 load→resume→save 恢复 Haller train metadata 与 global calibration
+  policy。新增/补强 metrics count/ratio 边界、3-view provenance 和 CUDA RNG guard 测试。
+  本地 W2 targeted `23 passed`，相关回归 `146 passed`；SHU-server GPU0 targeted
+  `23 passed`。真实 `cylinder2d` 240 帧裁剪 + train/calibration/test split、真实
+  W1-H artifact、vendor `PathlineTransformerV0` 的 5-epoch W2 smoke 在服务器完成：
+  `(1,4,16,7)`、3 views、gate `0.05`、loss 全部 finite、`global_step=5`；最终 checkpoint
+  `/data/xuziyi/tmp/w2-real-smoke-server-final.pt` 的 strict GPU0 resume 恢复
+  `mode=W2`、anchor/calibration source 和 CPU/CUDA RNG。全量回归为 `369 passed`、
+  `3 warnings`、`19 errors`，错误仍全部是既有 evaluator fixture 对受保护
+  `outputs/eval_test_ds`/`outputs/eval_tau_test_ds` 的 PermissionError，非 W2 失败。
+  小裁剪完整 sampler 预检因负样本池为空而按 contract fail loudly，正式多数据集产物需
+  补非空采样池覆盖；Haller canonical 参数对应继续保持 `pending_verification`。下一步
+  为依赖票 08/WS-8 W3。
+
+- 2026-09-02 **票 07 最终代码收口**：补强 W2 train-anchor metadata 的
+  `pending_verification`/no-fallback/coverage contract，兼容 Haller artifact 的
+  canonical coverage mapping；同一 manifest 内允许 frame-specific input hash，仍以
+  manifest identity 和 anchor hash 守护一致性。补上 typed calibration record 重校验、
+  test-only alias/path guard、完整 mean/variance/entropy distribution metrics、
+  population variance 上限和 W2 strict CUDA RNG 默认值。最终本地 W2 targeted 为
+  `46 passed`，相关回归为 `169 passed`、3 个 Paramiko deprecation warning；SHU-server
+  GPU0 targeted 为 `46 passed`。真实 `cylinder2d-real-smoke-crop`（240×32×256，
+  train/calibration/test=[0,120)/[120,144)/[144,240)）使用真实 train anchor 与
+  calibration Haller GT 完成 5 epoch vendor `PathlineTransformerV0` smoke：
+  `(1,4,16,7)`、3 views、global variance gate `0.05`、5 个 finite losses、
+  `global_step=5`；checkpoint `/data/xuziyi/tmp/w2-real-smoke-server-final.pt`
+  在 GPU0 以 strict CUDA RNG 完成 `mode=W2`、epoch/global step、anchor/calibration
+  source、selection 和 RNG 恢复。完整回归为 `392 passed`、3 warnings、19 errors，
+  19 项仍全部是既有 evaluator fixture 对受保护
+  `outputs/eval_test_ds`/`outputs/eval_tau_test_ds` 的 PermissionError，非 W2 失败。
+  该小裁剪的负采样池为空，因此 smoke 使用公开 `sample_at` seam；正式 sampler 的
+  fail-loud 约束未放宽。Haller 文献及工程参数的 canonical 对应继续保持
+  `pending_verification`，下一步为依赖票 08/WS-8 W3。
+
+- 2026-09-02 **票 08（W3 trajectory contrastive）完成**：新增 `w3.py` 与
+  `tests/test_w3_trajectory_contrastive.py`，在不修改 vendor 的前提下以外部
+  adapter 暴露 7-channel/5×5 local-IVD trajectory embedding，固定 student 两视图、
+  W2 teacher 三视图、64 维 projection、temperature 0.1、两视图合计最多 512、
+  single-GPU in-batch pair/no memory bank；可靠 Haller anchor/W2 pseudo 才能形成
+  pair，unknown/solid/invalid/不可靠 pseudo 被排除。补上 split/window/source、
+  Haller provenance/hash/failure/pending-verification、test-only metadata、资源统计、
+  显式 mode、共享参数、原子 checkpoint、失败回滚和 checkpoint round-trip 守护。
+  验证：W3 targeted `26 passed`，W2 targeted `46 passed`，相关/非 evaluate 全量
+  回归 `391 passed`；完整 `python -m pytest -q` 为 `418 passed`、6 warnings、19 个
+  既有 evaluate fixture PermissionError（受保护的 `outputs/eval_test_ds` 与
+  `outputs/eval_tau_test_ds`，非 W3 失败）。SHU-server `/data/xuziyi/cylinder_vortex_pipeline` 使用真实
+  `PathlineTransformerV0`、`CUDA_VISIBLE_DEVICES=0` 完成 5 epoch/5 step finite smoke，
+  日志为 `/data/xuziyi/tmp/codex-logs/w3-ticket08-real-vendor-gpu-final3-20260902.log`，
+  `w3.py` 远端与本地 SHA256 一致。Haller Zotero `L2PX3NQX` 的工程参数对应继续为
+  `pending_verification`；未修改 vendor、旧 baseline 或旧 spec/issues。下一步为
+  WS-9 pilot 与 calibration-only 方法选择。
+- 2026-09-02 **票 09 端到端实施接缝完成、生产验收阻塞**：新增
+  `e2e_weak_supervision.py` 与 `evaluation_report.py`，接通 B0/B1/W1-P/W1-H/W2/W3
+  的 split-contained train → calibration → checkpoint round-trip → explicit
+  `haller_gt_test` evaluation；加入六数据集逐数据集 P/R/F1/IoU 与等权 macro、
+  Boussinesq stress、coverage/invalid/failure/area-ratio、global threshold/W2 gate/W3
+  selection，以及 source/schema/split/window/RNG/test-leakage guards。TDD targeted
+  为本地 8+4 passed、相关回归 180 passed；SHU-server CPU targeted 8+4 passed、
+  全量 80 passed。新代码未修改 vendor、旧 baseline 或旧 spec/issues；本地全量
+  的既有 19 个 `tests/test_evaluate.py` fixture PermissionError 仍存在且非本票失败。
+  当前尚未生成六数据集 weak-supervision split 与独立的 Haller train/calibration/test
+  artifacts，故 50 epoch×1 的 production pilot 未运行；Haller 依据继续保持
+  `pending_verification`，WS-9 生产验收待 artifacts 就绪。
+- 2026-09-03 **票 09 artifact 准备实测与暂停**：将六个有效历史数据集复制到
+  SHU-server `/data/xuziyi/cylinder_vortex_pipeline/outputs/datasets/`，新增并运行
+  `prepare_weak_supervision_artifacts.py`；六个 `weak_supervision` split 和六个
+  W1-P `p90/p60/unknown` target 已生成，远端 `scipy==1.18.1`、`scikit-image==0.26.0`
+  安装在用户环境，安装日志为 `/data/xuziyi/tmp/codex-logs/ticket09-deps-install.log`。
+  Haller 仍按冻结工程参数与 `pending_verification` 文献状态执行；由于真实
+  `boussinesq` 帧约有 1,579 个局部极大值、每峰 32 个 contour level，
+  `scipy/skimage` CPU contour 阶段成为主要耗时。artifact preparer 增加了独立 frame
+  的可控 process 并行和 resume，测试为 2 passed；服务器曾以 24 个 CPU worker 实测，
+  用户要求暂停后已停止，当前仅保留 `haller_anchor_train/boussinesq` 83 帧部分产物，
+  无完整 Haller manifest、calibration/test artifacts，pilot 未启动。远端无
+  `cupy`/`cucim`，现有 Haller contour 实现没有 CUDA backend；GPU 只能留给后续训练
+  pilot，不能直接加速当前 `skimage.find_contours`/`ConvexHull` 语义。长任务日志为
+  `/data/xuziyi/tmp/codex-logs/ticket09-artifacts-prepare.log`；下一步从现有产物
+  resume Haller 生成，或另立 GPU contour 后端票据并重新完成语义验收。
 
 ## 12. B1/W1/W2/W3 弱监督持续交接（阶段 0 已完成）
 
@@ -357,9 +556,11 @@ AMP（独立小票，改迁移忠实性）——目标 <20h 需 A100 级硬件�
 |---|---|---|
 | 总项目阶段 0（迁移、数据、基线代码） | **已完成**；E 盘工作区、vendor、历史和 240 passed 基线均已核实 | 不重复迁移，不修改 `vendor/DeepUtils/` |
 | B0 旧 130-epoch 结算 | 已交付，采用旧 60/40 划分 | 仅作历史参考；新主实验必须按 §12.4 的新三段划分重新训练 |
-| B1/W1/W2/W3 代码 | 尚未实现 | 先在新上下文运行 `/to-spec`，再运行 `/to-tickets` |
-| 新规格/票 | 尚未创建 | 使用 feature slug `b1-w1-w2-w3-weak-supervision`，不要覆盖旧基线目录 |
-| Haller 2016 精确文献条目 | **Zotero 尚未找到精确匹配** | 用户补充条目/全文，或明确允许使用外部来源后，才冻结 Haller 公式与参数 |
+| B1/W1/W2/W3 代码 | **票据 01/03/04/05/06/07/08 已完成 split/label provenance、shared mode/checkpoint contract、B1 诊断消融、W1-P teacher 基础设施、W1-H Haller train-anchor、W2 uncertainty gate 与 W3 trajectory contrastive；WS-9 主训练/评价接缝已实现并通过 synthetic contract tests** | 生成/挂载六数据集 weak-supervision split 与独立 Haller train/calibration/test artifacts；再运行 WS-9 50 epoch×1 pilot 并按 calibration-only 规则选方法；B1 保持独立 diagnostic，不扩展为下游实现 |
+| WS-9 pilot 与主方法选择 | **代码接缝已实现；生产验收阻塞**：synthetic 六方法 pathline → checkpoint → explicit test-Haller report、六数据集 macro 和 leakage/checkpoint guards 已通过 | artifacts 就绪后运行 50 epoch×1 pilot，冻结 threshold/gate/epoch/method selection 后再进入 WS-10 |
+| Haller anchor extractor 票 02 | **已完成**：单帧 standard IVD、fluid peaks、32-level contour、几何筛选、三态 anchor、source-specific artifact 与 load-time integrity guard 已实现并通过 targeted tests；工程参数仍是 pending-verification 的工程口径 | 票 06/07 已接入 train-only W1-H/W2 adapter、global calibration gate 与 checkpoint provenance；后续生成六数据集 weak split 产物 |
+| 新规格/票 | 新规格、11 张 issue 已由用户确认并发布 | 规格位于 `.scratch/b1-w1-w2-w3-weak-supervision/spec.md`；票位于同目录 `issues/01..11-*.md`，不能覆盖旧基线目录 |
+| Haller 2016 精确文献条目 | **Zotero `L2PX3NQX` 条目已匹配；当前实施继续将全文/算法细节及工程阈值 canonical 对应视为 pending-verification** | 不把 `0.10`、`8*max(dx,dy)`、`2*max(dx,dy)`、p60 等工程值写成 canonical paper parameters；后续 Haller 票据继续保存版本、输入 hash 和 failure count |
 
 ### 12.2 已冻结的研究决策（新会话不得自行改写）
 
@@ -382,7 +583,7 @@ AMP（独立小票，改迁移忠实性）——目标 <20h 需 A100 级硬件�
 
 1. **读取上下文**：完整读取 `HANDOFF.md`、`E:\codex\AI CFD\B1_W1_W2_W3_弱监督方案.md`、`.scratch/vortex-extraction-pipeline/spec.md`、`.scratch/vortex-extraction-pipeline/issues/`，并查看 `docs/agents/issue-tracker.md`、`docs/agents/triage-labels.md`、`docs/agents/domain.md`。确认工作目录是 `E:\codex\AI CFD\cylinder_vortex_pipeline`；服务器执行目录为 `/data/xuziyi/cylinder_vortex_pipeline`。
 2. **读取并遵循 skills**：先读 `to-spec/SKILL.md`、`to-tickets/SKILL.md`、`ask-matt/SKILL.md`、`writing-for-agents/SKILL.md`。按 ask-matt 保持从 to-spec 到 to-tickets 的同一上下文；之后每一张实现票再开启新上下文，内部调用 `tdd` 和 `code-review`。
-3. **先做 Zotero 门槛核验**：涉及 Haller 原始论文、公式或算法参数时，先检索本地 Zotero。当前已知状态是仅有 VortexTransformer 精确条目，Haller 2016 精确条目未找到；在文献补齐或用户明确允许外部来源前，把 Haller 作为“用户方案中待核实输入”，不得声称已由 Zotero 证实。
+3. **先做 Zotero 门槛核验**：涉及 Haller 原始论文、公式或算法参数时，先检索本地 Zotero。2026-09-01 已返回候选精确条目 `L2PX3NQX`，本地全文已核对 IVD 公式与二维 Eulerian 流程骨架；工程离散阈值及其 canonical 对应关系仍是“待核实输入”，不得声称已由 Zotero 证实。
 4. **调用 `/to-spec`**：不要直接实现代码。探索当前代码和模块边界后，把本节冻结决策转换为新规格，至少覆盖 Problem Statement、Solution、User Stories、Implementation Decisions、Testing Decisions、Out of Scope、Further Notes；使用 §8 的三条扩展接缝，端到端训练/评价缝为主验收缝。将规格发布到 `.scratch/b1-w1-w2-w3-weak-supervision/spec.md`，状态为 `ready-for-agent`。规格草案中的接缝、Haller 参数待核实项和主/辅实验边界必须先让用户确认。
 5. **调用 `/to-tickets`**：在用户确认规格和接缝后，将规格拆成 blockers-first 的 tracer-bullet 垂直票；每票写独立验收标准、`Blocked by` 和可运行的验证命令，发布到 `.scratch/b1-w1-w2-w3-weak-supervision/issues/NN-<slug>.md`，一票一文件、状态按 `triage-labels.md` 标 `ready-for-agent`。向用户列出 Title、Blocked by、What it delivers，确认颗粒度和依赖边后再正式落盘；不要改动旧基线 spec/issues。
 6. **进入实现**：只有用户确认票拆分后，才按依赖顺序逐票 `/implement`。每票新上下文先读该票、§12 和依赖票的验收结果；代码新增中文领域 docstring，遵守依赖和 vendor 边界；相关测试通过后在本节更新状态并在 §11 追加日志。长时训练只在 SHU-server 执行，先 smoke/pilot，再按预算进入最终实验。
@@ -417,28 +618,30 @@ AMP（独立小票，改迁移忠实性）——目标 <20h 需 A100 级硬件�
 
 | 阶段 | 内容 | 依赖 | 完成判据 |
 |---|---|---|---|
-| WS-1 | 新规格与 tickets | 阶段 0（已完成） | 新 spec、逐票 issues 已发布，接缝和依赖边经用户确认 |
-| WS-2 | Haller 文献门槛与单帧 prototype | WS-1；文献核验 | Zotero/用户授权状态明确；Rankine 合成场与少量真实 train 帧能产出闭合轮廓/失败计数/预览；参数元数据可复现 |
-| WS-3 | 新 split、窗口和 GT/anchor 数据契约 | WS-2 | 六数据集 0/50/60/100 切分无跨界窗口；train/calibration/test 来源隔离由测试守护 |
-| WS-4 | B1 诊断输入消融 | WS-3 | B1 单批前向、loss、checkpoint 与评估跑通；仅输入 channel 改变；结果单独归档 |
-| WS-5 | W1-P 基础设施 | WS-3、WS-4 可复用 adapter | p90/p60/unknown 数据、masked loss、EMA、pseudo/consistency、10–15 epoch ramp-up 在 5–10 epoch smoke 下稳定 |
-| WS-6 | W1-H 正式 physics anchors | WS-2、WS-3、WS-5 | 使用 Haller train anchors；p85 不进入 `Lweak`；test GT 不被读取；anchor coverage/可视化/版本哈希完整 |
-| WS-7 | W2 uncertainty-aware pseudo labels | WS-6 | 3-view mean/variance 或 entropy、双门控 mask、接受率和 calibration 选择可复现；test 未参与门控 |
-| WS-8 | W3 trajectory contrastive | WS-7 | 512×2 single-GPU smoke 无 OOM；embedding/projection/contrastive loss、checkpoint 往返和 pair 统计通过 |
-| WS-9 | pilot 与主方法选择 | WS-4～WS-8 | 所有方法 pilot 50 epoch/1 seed；按 calibration 预先定义选择规则；确定最佳 baseline/proposed，不查看 test 做选择 |
+| WS-1 | 新规格与 tickets | 阶段 0（已完成） | **已完成**：新 spec、11 张逐票 issues 已发布，接缝和依赖边经用户确认 |
+| WS-2 | Haller 文献门槛与单帧 prototype | WS-1；文献核验 | **票 02 已完成单帧 prototype**：Zotero 候选与证据边界已记录；Rankine 合成场和真实 train frame 700 preview 产出闭合轮廓/失败计数/三态 coverage；版本、冻结工程参数、输入/mask/array hash 和 failure count 可复现。Haller 算法细节及工程值的 canonical 对应仍待核实 |
+| WS-3 | 新 split、窗口和 GT/anchor 数据契约 | WS-2 | **票据 01/03 已完成**：六数据集白名单、0/50/60/100 切分、无跨界完整窗口、来源/版本/hash、train-only normalization、test Haller evaluation guard，以及公共 mode/schema/batch/checkpoint contract 均由测试守护；Haller artifact/anchor 生成仍留给后续票据 |
+| WS-4 | B1 诊断输入消融 | WS-3、票 03 shared mode/adapter/checkpoint contract | **已完成（票 04）**：B1 单批前向、loss、5 epoch CPU smoke、独立 contract checkpoint/report 与 source/split/window/schema/leakage guard 跑通；仅输入 channel 改变，结果单独归档 |
+| WS-5 | W1-P 基础设施 | WS-3、票 03 shared mode/adapter/checkpoint contract | **已完成（票 05）**：p90/p60/unknown 数据、masked loss、EMA、pseudo/consistency、12 epoch ramp-up、source/split/schema/checkpoint guard 在 5 epoch CPU smoke 下通过；不以 B1 结果为前置 |
+| WS-6 | W1-H 正式 physics anchors | WS-2、WS-3、WS-5、票 03 | **已完成（票 06）**：独立 `haller_anchor_train` artifact 接入 7-channel、5×5 local-IVD pathline window；known/unknown/solid/failed mask、masked anchor BCE、EMA/pseudo/consistency/ramp、coverage/count/failure/pseudo/disagreement diagnostics、checkpoint source/hash 与 split/window guard 均通过；后续为六数据集 artifact 生成和 WS-7/W2 |
+| WS-7 | W2 uncertainty-aware pseudo labels | WS-6 | **已完成（票据 07）**：同一 EMA teacher 的固定 3-view mean/population variance/entropy、0.90/0.10 confidence + 单一 global variance 双门控、acceptance/distribution/disagreement metrics、calibration global gate/threshold 选择与 checkpoint 往返可复现；window 必须 split-contained 且使用 canonical 5×5 local-IVD 7-channel schema，source/test/checkpoint/CUDA RNG guard 均 fail loudly；Haller train metadata 的 pending-verification/no-fallback/coverage contract 与 frame-specific manifest identity 已守护；SHU-server GPU0 真实 smoke 与 strict resume 已通过；test Haller/test-only metrics 进入训练或选择路径 fail loudly |
+| WS-8 | W3 trajectory contrastive | WS-7 | **已完成（票 08）**：external vendor adapter 暴露 7-channel trajectory embedding；student 2 views + W2 teacher 3 views、projection 64、temperature 0.1、最多 512 embeddings、single GPU/in-batch/no memory bank；可靠 pair/exclusion、split/window/source/test leakage、Haller pending-verification metadata、checkpoint round-trip/atomic rollback 与资源统计通过；本地 W3 26 targeted、非 evaluate 全量 391 passed，真实 vendor GPU0 5 epoch smoke 通过 |
+| WS-9 | pilot 与主方法选择 | WS-4～WS-8 | **代码接缝已实现，生产验收仍阻塞**：synthetic pathline→step→checkpoint→explicit test-Haller report、六数据集 macro 和 leakage/checkpoint guards 已验证；六个 weak split/W1-P target 已生成，但 Haller 仅完成 `boussinesq` train 的 83 个部分 frame artifact，尚无完整 train/calibration/test manifest；CPU contour 是当前 blocker，现有实现没有 CUDA backend，pilot 未运行；artifacts 就绪后按 global calibration rule 运行并确定 baseline/proposed |
 | WS-10 | final、鲁棒性和交付文档 | WS-9 | B0+最佳 baseline+proposed 100/130 epoch×3 seeds；六数据集+macro P/R/F1/IoU；clean-Haller GT robustness；README/HANDOFF/结果索引更新 |
 
-### 12.6 当前必须显式解决的技术问题
+### 12.6 用户确认后的实现注意事项
 
-这些问题在 `/to-spec` 中列为决策点；若会改变主实验定义，新会话必须停在规格确认处询问用户，不能用默认值掩盖。
+以下事项已经由用户在规格和票据阶段确认；实现不得自行改写。Zotero 本地全文已核对 Haller 的 IVD
+公式和二维 Eulerian 流程骨架，但工程参数与 canonical paper parameters 的逐项对应仍未完成核验。
 
-1. Haller 标准 IVD 的精确文献来源、分析域平均涡量的 mask/边界定义，以及 contour levels 的搜索范围；当前 Zotero 未找到精确论文条目。
-2. 闭合边界参数：凸度缺陷容差、最小周长/面积、边界 unknown 带宽度、低 IVD negative 条件、多个嵌套轮廓的最外围选择和无合法轮廓时的 fallback。
-3. calibration 的允许用途：建议只用于 anchor/伪标签阈值与 smoke 选择，不用于训练；需要在 spec 中固定是否允许选择最终 epoch/方法。
-4. final epoch 采用 100 还是 130、pilot 到 final 的最佳 baseline/proposed 选择规则，以及三 seeds 的具体列表。
-5. W2 的 confidence/uncertainty gate（probability threshold、variance/entropy 定义、MC passes=3 是否冻结）和报告口径。
-6. robustness 的噪声分布、幅度、降采样倍率、是否对速度场或 pathline feature 注入，以及“重新计算 Haller-IVD”使用的数值参数是否完全固定。
-7. B1 是否仅报告新 split 主结果，或另外保留与旧 B0 130-epoch 结算的不可比诊断表；默认不混合，若要并列必须显式标为不同 split。
+1. Haller 使用候选 Zotero 条目 `L2PX3NQX`；公式与流程骨架已由本地全文核对，工程阈值对应关系仍待核实，实现必须保留该“待核实”标记。
+2. Haller 工程参数固定为每帧 fluid vorticity mean、8-neighborhood、32 个线性 levels（1.0→0.1）、0.10 convexity defect、`8*max(dx,dy)` minimum perimeter、outermost、`2*max(dx,dy)` unknown band、frame p60 low-IVD negative、train-unknown/test-invalid fallback。
+3. calibration 只可读取 calibration Haller GT，用于 global prediction threshold、global W2 variance gate 和 W1-H/W2 best-baseline method selection；不得改训练权重、normalization、Haller 参数、pseudo-label 规则或 final epoch。
+4. final 固定 130 epochs、seeds `[0,1,2]`；headline 为 B0、W1-H/W2 中选出的 best baseline 和 W3 proposed；B1 永远单独 diagnostic。
+5. W2 固定 3 stochastic views、mean/variance gate、0.90/0.10 confidence、variance 主 gate、entropy 诊断、global calibration threshold。
+6. W3 固定两视图合计最多 512 embeddings、2 views、projection dimension 64、temperature 0.1、single GPU、in-batch contrastive、无 memory bank。
+7. robustness 固定 clean-Haller GT hash、train speed RMS 的 0.01/0.05/0.10 Gaussian `u/v` noise、无 clipping、solid 不加噪、factor 2/4 anti-aliased mask-aware downsampling/reconstruction 和相同参数 recompute。
+8. B1 old/new split 结果完全分开，B1 不成为 W1 前置，也不进入 final headline。
 
 ### 12.7 持续维护协议
 
@@ -473,8 +676,9 @@ proposed method 做 100/130 epoch×3 seeds。W3 首版为 single GPU、最多 51
 2 stochastic views、in-batch contrastive、无 memory bank。Haller 实现允许 scipy/scikit-image。
 
 严格按 ask-matt 流程工作：先读取并遵循 to-spec、to-tickets、ask-matt、writing-for-agents
-的 SKILL.md；先做 Zotero 文献核验。当前已知 Haller 2016 精确条目尚未在 Zotero 找到，
-因此在用户补充条目/全文或明确允许外部来源前，保持“待核实”，不要声称已核实。
+的 SKILL.md；先做 Zotero 文献核验。当前 Zotero 已返回候选 Haller 2016 条目 `L2PX3NQX`；
+本地全文已核对 IVD 公式与二维 Eulerian 流程骨架，但工程阈值与 canonical 参数对应关系仍待核实，
+因此不要把工程值声称为论文已核实参数。
 
 现在调用 /to-spec。先探索仓库和模块边界，使用 HANDOFF §8 的三条扩展接缝，产出
 `.scratch/b1-w1-w2-w3-weak-supervision/spec.md`，包含 Problem Statement、Solution、

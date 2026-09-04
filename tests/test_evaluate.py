@@ -539,6 +539,55 @@ class TestCLI:
 class TestEndToEndSmoke:
     """端到端冒烟（随机模型，结构验证）。"""
 
+    def test_explicit_haller_test_reference_is_separate_from_sampling_labels(
+            self, tmp_path):
+        """test GT 必须来自独立 Haller artifact，而非 dataset 的 p85 label。"""
+        import dataset as ds
+        import evaluate
+        import haller_anchors
+
+        T, Y, X = 80, 32, 32
+        rng = np.random.default_rng(909)
+        u = rng.uniform(-1, 1, (T, Y, X)).astype(np.float32)
+        v = rng.uniform(-1, 1, (T, Y, X)).astype(np.float32)
+        xdim = np.linspace(0, 3, X, dtype=np.float64)
+        ydim = np.linspace(-1, 2, Y, dtype=np.float64)
+        tdim = np.linspace(0, 1, T, dtype=np.float64)
+        mask = np.zeros((Y, X), dtype=bool)
+        dataset_root = tmp_path / "weak" / "datasets" / "fixture" / "dataset"
+        ds.prepare_dataset(
+            u=u, v=v, xdim=xdim, ydim=ydim, tdim=tdim, mask=mask,
+            out_dir=str(dataset_root), dataset_name="fixture",
+            split_mode=ds.WEAK_SUPERVISION_SPLIT_MODE,
+            label_source="legacy_p85", patch_size=(8, 8), stride=(4, 4),
+            t_win=8, window_step=4)
+
+        frame = 48
+        haller_root = tmp_path / "haller"
+        artifact = haller_anchors.extract_haller_anchors(
+            u[frame], v[frame], xdim, ydim, mask,
+            source=haller_anchors.SOURCE_TEST, frame_index=frame)
+        haller_anchors.save_haller_artifact(
+            artifact,
+            haller_root / haller_anchors.SOURCE_TEST / "fixture" / f"frame{frame}",
+        )
+
+        config = {
+            "evaluation_label_source": haller_anchors.SOURCE_TEST,
+            "haller_test_root": str(haller_root),
+            "patch_size": [8, 8], "stride": [4, 4],
+            "t_win": 8, "window_step": 4,
+        }
+        store = evaluate._make_single_store(dataset_root, "test", config)
+        labels, metric_mask, metadata = evaluate._load_haller_test_reference(
+            store, frame)
+
+        assert store.label_source == "legacy_p85"
+        assert metadata["source"] == haller_anchors.SOURCE_TEST
+        assert np.array_equal(
+            labels, artifact["anchor_state"] == haller_anchors.POSITIVE)
+        assert np.all(metric_mask[artifact["anchor_state"] == haller_anchors.UNKNOWN])
+
     def test_full_pipeline(self, tmp_path):
         """run_evaluation 全管线跑通。"""
         import yaml

@@ -1,0 +1,69 @@
+# B1 诊断性 local-IVD 输入消融配置（弱监督新 split）。
+#
+# B1 只移除模型输入中的 local-IVD channel；数据标签仍为 legacy_p85，且
+# split/window/normalization 必须来自 weak_supervision metadata。实际训练用法：
+#   python train_kaggle.py --config config/pathline_transformer_b1.yaml \
+#       --mode B1 --resume auto
+#
+# outputs/b1_diagnostic 是 B1 独立 artifact namespace，不覆盖 B0/W1/W2/W3。
+
+data:
+  root:
+    - outputs/datasets/boussinesq/dataset
+    - outputs/datasets/cylinder2d/dataset
+    - outputs/datasets/doublegyre2d/dataset
+    - outputs/datasets/fourcenters2d/dataset
+    - outputs/datasets/jungtelziemniak2d/dataset
+    - outputs/datasets/pipedcylinder2d/dataset
+  dataset_scope: valid_six_datasets
+  split_mode: weak_supervision
+  split: train
+  val_split: none
+  label_source: legacy_p85
+  sampling_source: legacy_p85
+  loss_label_source: legacy_p85
+  seed: 0
+  batch_size: 100
+  num_workers: 8
+  samples_per_epoch: 20000
+  positive_fraction: 0.5
+  patch_size: [32, 32]
+  stride: [16, 16]
+  t_win: 24
+  window_step: 4
+  t_scale: 0.25
+  groups: [8, 8]
+  delta_frac: 0.05
+  L: 16
+  n_substeps: 4
+
+model:
+  NAME: BaseSeg
+  encoder_args:
+    NAME: PathlineTransformerV0
+    in_channels: 6                 # [px, py, t, distance, u, v]
+    PathlineGroups: 64
+    KpathlinePerGroup: 4
+    num_classes: 1
+    num_encoder_layers: 3
+    dmodel: 144
+    k: 16
+  criterion_args:
+    NAME: BCELoss
+
+train:
+  mode: B1
+  epochs: 10                         # development smoke；pilot 可显式覆盖为 50
+  lr: 0.0001
+  weight_decay: 0.000001
+  warmup_epochs: 60
+  second_lr: 0.000005
+  grad_clip: 1.0
+  save_freq: 30
+  seed: 0
+  device: auto
+  amp: false
+  data_parallel: false
+  ckpt_dir: outputs/b1_diagnostic
+  run_name: pathline_transformer_b1
+  warm_start_aux: false

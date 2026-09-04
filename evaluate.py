@@ -86,6 +86,13 @@ def _extract_one_sample(store, py, px, frame, t_scale, rng_base):
     import extractor as ex
     import dataset as ds_lib
 
+    if getattr(store, "is_weak_supervision", False):
+        frame = ds_lib.validate_window_start(
+            frame, split_start=store.split_i0, split_end=store.split_i1,
+            t_win=store.t_win, dataset_name=store.dataset_name,
+            split_name=store.split, T=store.T)
+    else:
+        frame = int(frame)
     geo = ex.patch_geometry((py, px), store.patch_size, store._xdim, store._ydim)
     u_win = np.asarray(store._u_mm[frame:frame + store.t_win], dtype=np.float32)
     v_win = np.asarray(store._v_mm[frame:frame + store.t_win], dtype=np.float32)
@@ -211,6 +218,13 @@ def _dense_extract(store, frame, seeds_phys, t_scale):
     import extractor as ex
     import dataset as ds_lib
 
+    if getattr(store, "is_weak_supervision", False):
+        frame = ds_lib.validate_window_start(
+            frame, split_start=store.split_i0, split_end=store.split_i1,
+            t_win=store.t_win, dataset_name=store.dataset_name,
+            split_name=store.split, T=store.T)
+    else:
+        frame = int(frame)
     u_win = np.asarray(store._u_mm[frame:frame + store.t_win], dtype=np.float32)
     v_win = np.asarray(store._v_mm[frame:frame + store.t_win], dtype=np.float32)
     ivd_win = np.asarray(store._ivd_mm[frame:frame + store.t_win], dtype=np.float32)
@@ -491,8 +505,50 @@ def make_animation(frames_prob, frames_speed,
 
 
 def _make_single_store(data_root, split, data_cfg):
-    """构造单个 evaluation store（_DatasetStore）。"""
+    """构造单个 evaluation store（_DatasetStore）。
+
+    新弱监督 test evaluation 必须由 config 显式提供
+    ``evaluation_label_source: haller_gt_test``，并且产物 metadata 也必须
+    声明同一 source；不能以 legacy/p90-p60 label 绕过 test GT。旧 B0
+    metadata 没有 weak split 合同时继续走历史 label 评估兼容路径。
+    """
     import dataset as ds
+
+    meta = ds.load_dataset_meta(data_root)
+    evaluation_label_source = data_cfg.get("evaluation_label_source")
+    if (meta.get("split_mode") == ds.WEAK_SUPERVISION_SPLIT_MODE
+            and split == "test"
+            and evaluation_label_source != "haller_gt_test"):
+        raise ValueError(
+            "weak supervision test evaluation requires explicit config "
+            "evaluation_label_source='haller_gt_test'"
+        )
+
+    use_haller_test = evaluation_label_source == "haller_gt_test"
+    if use_haller_test and split != "test":
+        raise ValueError(
+            "haller_gt_test evaluation 只能用于 split='test'，"
+            f"实际 split={split!r}"
+        )
+    haller_test_root = data_cfg.get("haller_test_root")
+    if use_haller_test and not haller_test_root:
+        raise ValueError(
+            "显式 haller_gt_test evaluation 必须提供 data.haller_test_root；"
+            "不能从 weak dataset 的 label.npy 回退读取 test GT"
+        )
+
+    # The weak dataset still supplies the deterministic pathline sampling pool.
+    # Its field label remains legacy_p85 and is never used as the evaluation GT.
+    sampling_label_source = data_cfg.get("sampling_label_source")
+    if sampling_label_source is None:
+        sampling_label_source = data_cfg.get("label_source")
+    if sampling_label_source is None:
+        sampling_label_source = meta.get("label_source", "legacy_p85")
+    if use_haller_test and sampling_label_source == "haller_gt_test":
+        raise ValueError(
+            "haller_gt_test 不能作为 pathline sampling label；请显式设置 "
+            "data.sampling_label_source='legacy_p85'，test GT 从独立 artifact 读取"
+        )
 
     common = dict(
         patch_size=tuple(int(v) for v in data_cfg.get(
@@ -508,9 +564,77 @@ def _make_single_store(data_root, split, data_cfg):
         L=int(data_cfg.get("L", ds.DEFAULT_L)),
         n_substeps=int(data_cfg.get("n_substeps", 4)),
     )
-    return ds.WeakLabelPathlineDataset(
+    dataset = ds.WeakLabelPathlineDataset(
         str(data_root), split=split, ds_id=None,
-        samples_per_epoch=8, **common).store
+        samples_per_epoch=8, consumer="evaluation",
+        label_source=sampling_label_source,
+        **common).store
+    if use_haller_test:
+        # Keep the independent source on the store only as an evaluation
+        # provider.  No Haller test array is loaded during store construction.
+        dataset._haller_test_root = pathlib.Path(haller_test_root)
+    return dataset
+
+
+def _load_haller_test_reference(store, frame):
+    """Load one explicit test Haller artifact and return binary eval labels.
+
+    The old ``evaluate.py`` pathline sampler still needs the dataset's legacy
+    p85 field label to build deterministic seed pools.  For a weak-supervision
+    test evaluation, this helper is the only source of the reference label:
+    Haller unknown, solid, and invalid cells are converted to the metric mask
+    so they cannot enter the confusion denominator.
+    """
+    import haller_anchors
+
+    root = getattr(store, "_haller_test_root", None)
+    if root is None:
+        raise ValueError(
+            "store 未绑定 haller_test_root；显式 test Haller evaluation 配置不完整"
+        )
+    frame = int(frame)
+    if frame < 0 or frame >= int(store.T):
+        raise ValueError(f"test Haller frame={frame} 超出 store T={store.T}")
+    root = pathlib.Path(root)
+    candidates = (
+        root / haller_anchors.SOURCE_TEST / store.dataset_name / f"frame{frame}",
+        root / store.dataset_name / f"frame{frame}",
+    )
+    artifact_dir = next((path for path in candidates if path.exists()), None)
+    if artifact_dir is None:
+        raise FileNotFoundError(
+            "缺少显式 haller_gt_test artifact："
+            + " 或 ".join(str(path) for path in candidates)
+        )
+    artifact = haller_anchors.load_haller_artifact(
+        artifact_dir, expected_source=haller_anchors.SOURCE_TEST
+    )
+    metadata = artifact["metadata"]
+    if metadata.get("split_name") not in (None, "test"):
+        raise ValueError("haller_gt_test artifact split metadata 必须为 test")
+    state = np.asarray(artifact["anchor_state"], dtype=np.int8)
+    expected_shape = (int(store.Y), int(store.X))
+    if tuple(state.shape) != expected_shape:
+        raise ValueError(
+            f"haller_gt_test artifact shape={state.shape} 与 dataset={expected_shape} 不一致"
+        )
+    solid = artifact.get("solid_mask")
+    if solid is None:
+        solid = np.zeros(expected_shape, dtype=bool)
+    else:
+        solid = np.asarray(solid, dtype=bool)
+    dataset_solid = np.asarray(store._mask2d, dtype=bool)
+    valid = bool(metadata.get("valid", False))
+    known = (
+        np.isin(state, [haller_anchors.NEGATIVE, haller_anchors.POSITIVE])
+        & ~solid & ~dataset_solid & valid
+    )
+    labels = (state == haller_anchors.POSITIVE).astype(np.uint8)
+    # ``compute_frame_metrics`` accepts a solid-style exclusion mask.  Using
+    # the complement of known deliberately excludes Haller unknown and an
+    # invalid frame without manufacturing an all-negative target.
+    metric_mask = ~known
+    return labels, metric_mask, metadata
 
 
 def _frame_in_split(frame, store):
@@ -536,13 +660,21 @@ def _single_store_eval(store, model, frame, t_scale, device, tta, seed):
     u_frame = np.asarray(store._u_mm[frame], dtype=np.float64)
     v_frame = np.asarray(store._v_mm[frame], dtype=np.float64)
     ivd_frame = np.asarray(store._ivd_mm[frame], dtype=np.float32)
-    label_frame = np.asarray(store._label_mm[frame], dtype=np.uint8)
+    haller_test_root = getattr(store, "_haller_test_root", None)
+    if haller_test_root is not None:
+        label_frame, metric_mask, haller_metadata = _load_haller_test_reference(
+            store, frame
+        )
+    else:
+        label_frame = np.asarray(store._label_mm[frame], dtype=np.uint8)
+        metric_mask = store._mask2d
+        haller_metadata = None
     speed = np.hypot(u_frame, v_frame).astype(np.float32)
     q_frame = weak_labels.q_criterion(
         u_frame[None], v_frame[None], store._xdim, store._ydim)[0].astype(np.float32)
 
     metrics = compute_frame_metrics(
-        prob_sw, label_frame, mask2d=store._mask2d, threshold=0.5)
+        prob_sw, label_frame, mask2d=metric_mask, threshold=0.5)
 
     return {
         "frame": int(frame),
@@ -554,6 +686,7 @@ def _single_store_eval(store, model, frame, t_scale, device, tta, seed):
         "xdim": store._xdim,
         "ydim": store._ydim,
         "metrics": metrics,
+        "haller_metadata": haller_metadata,
     }
 
 

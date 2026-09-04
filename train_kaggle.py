@@ -15,6 +15,8 @@
   每迹线涡概率 (B, K=256)）；损失 BCE（torch.nn.BCELoss）。
 
 实现约束：纯 torch/numpy/yaml（§2 依赖清单）；不 import 原仓库 train.py。
+弱监督 B1 通过 ``--mode B1`` 或 train.mode 显式进入
+``b1_diagnostic.run_b1_training``；未声明 mode 时保留阶段 0 的 B0 兼容路径。
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ import torch.nn as nn
 import yaml
 
 import dataset as ds
+import weak_supervision_contract as weak_contract
 from vendor.DeepUtils.models import build_model_from_cfg
 from vendor.DeepUtils.loss import build_criterion_from_cfg
 from vendor.DeepUtils.utils.random import set_random_seed
@@ -96,24 +99,36 @@ def load_config(path=DEFAULT_CONFIG_PATH):
     return cfg
 
 
-def build_model_from_config(config):
-    """配置 model 段 → 模型（vendor build_model_from_cfg；BaseSeg 包装可复用官方形态）。"""
+def build_model_from_config(config, mode=None):
+    """配置 model 段 → 模型；显式 mode 时走外部 channel adapter。
+
+    ``mode=None`` 保持阶段 0/B0 的旧构造路径；弱监督方法必须显式传 mode，
+    由 ``weak_supervision_contract`` 校验 schema 后再调用 vendor builder。
+    """
+    if mode is not None:
+        return weak_contract.build_model_for_mode(config, mode)
     return build_model_from_cfg(config["model"])
 
 
-def build_criterion_from_config(config):
-    """配置 model.criterion_args → 损失（BCELoss：模型 sigmoid 输出 + 0/1 标签）。"""
-    return build_criterion_from_cfg(config["model"]["criterion_args"])
+def build_criterion_from_config(config, mode=None):
+    """配置 model.criterion_args → 损失；显式 mode 时增加 batch contract guard。"""
+    criterion = build_criterion_from_cfg(config["model"]["criterion_args"])
+    return criterion if mode is None else weak_contract.ModeAwareLoss(mode, criterion)
+
+
+# 新弱监督票据使用显式 contract checkpoint；旧 save_ckpt/load_ckpt 保留给阶段 0。
+save_contract_checkpoint = weak_contract.save_checkpoint
+load_contract_checkpoint = weak_contract.load_checkpoint
 
 
 def _make_dataset(data_cfg, split):
     """YAML data 段 → WeakLabelPathlineDataset/MultiDatasetPathlineDataset。
 
-    data.root 为单个目录 → 单数据集（票 05 口径）；为目录列表 → 多数据集联合池
-    （票 07 延伸：各数据集前 60% 一起训练/后 40% 留出评估）。patch/窗口/十字
-    采样/时间采样参数全部从 YAML 传入（HANDOFF §6 参数表；与 prepare_dataset
-    口径一致）。值监控口径：val 损失按训练同款 50% 平衡采样计算；自然分布
-    精度评估属 --report-f1/票 08 弱定量表。
+    data.root 为单个目录 → 单数据集；为目录列表 → 多数据集联合池。旧产物仍可
+    使用历史 frac 口径，新弱监督产物由 metadata 的 train/calibration/test 合同
+    守护。patch/窗口/十字采样/时间采样参数全部从 YAML 传入；label_source 若在
+    YAML 中给出则必须与 metadata 一致，避免训练入口悄悄换源。自然分布精度评估
+    属 --report-f1/评估管线。
     """
     common = dict(
         patch_size=tuple(int(v) for v in data_cfg.get("patch_size", ds.DEFAULT_PATCH_SIZE)),
@@ -127,7 +142,8 @@ def _make_dataset(data_cfg, split):
         groups=tuple(int(v) for v in data_cfg.get("groups", ds.DEFAULT_GROUPS)),
         delta_frac=float(data_cfg.get("delta_frac", ds.DEFAULT_DELTA_FRAC)),
         L=int(data_cfg.get("L", ds.DEFAULT_L)),
-        n_substeps=int(data_cfg.get("n_substeps", 4)))
+        n_substeps=int(data_cfg.get("n_substeps", 4)),
+        label_source=data_cfg.get("label_source"))
     root = data_cfg.get("root", "outputs/datasets/pipedcylinder2d/dataset")
     if isinstance(root, (list, tuple)):
         return ds.MultiDatasetPathlineDataset(list(root), split=split, **common)
@@ -315,6 +331,8 @@ def main(argv=None):
         description="迹线 Transformer 涡提取训练（TwoStep 调度/每 epoch checkpoint/"
                     "可选 DataParallel/AMP；超参走 YAML）")
     ap.add_argument("--config", default=DEFAULT_CONFIG_PATH, help="YAML 配置路径")
+    ap.add_argument("--mode", default=None,
+                    help="显式弱监督 method mode；当前实现仅支持 B1 diagnostic")
     ap.add_argument("--resume", default="auto",
                     help="续训 checkpoint 路径；'auto'=ckpt_dir/run_name_ckpt_latest.pth"
                          "（存在则续）；'none'=从零开始")
@@ -330,6 +348,39 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     config = load_config(args.config)
+    configured_mode = config.get("train", {}).get("mode")
+    if args.mode is not None and configured_mode is not None:
+        requested_mode = weak_contract.canonical_mode(args.mode)
+        declared_mode = weak_contract.canonical_mode(configured_mode)
+        if requested_mode != declared_mode:
+            raise ValueError(
+                f"CLI --mode={requested_mode!r} 与 config train.mode="
+                f"{declared_mode!r} 不一致"
+            )
+    selected_mode = args.mode if args.mode is not None else configured_mode
+    if selected_mode is not None:
+        selected_mode = weak_contract.canonical_mode(selected_mode)
+        if selected_mode != weak_contract.MODE_B1:
+            raise ValueError(
+                f"当前票只实现 B1 diagnostic mode，实际 mode={selected_mode!r}"
+            )
+        # --mode 是显式的 CLI contract；允许它补齐缺失的 config train.mode，
+        # 但若配置已有 mode 则上面的 mismatch guard 已先行校验。
+        if args.mode is not None:
+            config.setdefault("train", {})["mode"] = selected_mode
+        if args.report_f1 or args.f1_split is not None:
+            raise ValueError(
+                "B1 diagnostic 不使用 legacy train script 的 F1/test 评价入口；"
+                "请由后续评价票据显式声明 evaluation source"
+            )
+        from b1_diagnostic import run_b1_training
+        return run_b1_training(
+            config,
+            resume=args.resume,
+            epochs=args.epochs,
+            max_steps=args.max_steps,
+        )
+
     train_cfg = config["train"]
     if args.epochs is not None:
         train_cfg["epochs"] = int(args.epochs)

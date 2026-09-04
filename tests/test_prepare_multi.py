@@ -60,6 +60,46 @@ class TestPrepareMulti:
         assert (tmp_path / "out" / "synthetic_a" / "previews" / "ivd_q_t10.png"
                 ).exists()
 
+    def test_prepare_one_explicit_weak_supervision_mode(self, tmp_path):
+        """多数据集驱动显式启用新 0/50/60/100 split，默认旧 frac 不漂移。"""
+        from prepare_multi import prepare_one
+        nc = tmp_path / "cylinder2d.nc"
+        _write_tiny_nc(nc, T=50)
+        out_root = tmp_path / "out_weak"
+        summary = prepare_one(
+            nc,
+            out_root,
+            split_mode="weak_supervision",
+            label_source="legacy_p85",
+            t_win=2,
+            window_step=2,
+            display_frames=(0, 49),
+        )
+
+        assert summary["split_mode"] == "weak_supervision"
+        assert summary["slices"] == {
+            "train": [0, 25],
+            "calibration": [25, 30],
+            "test": [30, 50],
+        }
+        assert summary["label_source"] == "legacy_p85"
+        assert summary["window"]["complete_only"] is True
+
+    def test_prepare_one_rejects_excluded_dataset_in_weak_mode(self, tmp_path):
+        """新实验池拒绝 Duffing 等非六个有效数据集，避免产物污染。"""
+        from prepare_multi import prepare_one
+        nc = tmp_path / "forceddampedduffing2d.nc"
+        nc.touch()
+        with pytest.raises(ValueError, match=r"six valid|六个有效|forceddampedduffing2d"):
+            prepare_one(
+                nc,
+                tmp_path / "out_excluded",
+                split_mode="weak_supervision",
+                label_source="legacy_p85",
+                t_win=2,
+                window_step=1,
+            )
+
     def test_main_writes_multi_meta(self, tmp_path):
         """CLI 主入口：--nc-dir/--names/--out-root → multi_meta.json 汇总。"""
         import json
