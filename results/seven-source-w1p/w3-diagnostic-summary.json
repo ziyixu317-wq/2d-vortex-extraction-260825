@@ -1,0 +1,61 @@
+{
+  "function": "ticket09_seven_source_w3.paired_go_no_go",
+  "input_rows": [
+    {
+      "seed": 0,
+      "support": "per-frame common direct observed-known",
+      "baseline_macro_f1": 0.9637042706855853,
+      "baseline_macro_iou": 0.9340790054226461,
+      "baseline_worst_dataset_f1": 0.8491803278688524,
+      "w3_macro_f1": 0.9603708822602909,
+      "w3_macro_iou": 0.9273179828191961,
+      "w3_worst_dataset_f1": 0.8639218422889045
+    },
+    {
+      "seed": 1,
+      "support": "per-frame common direct observed-known",
+      "baseline_macro_f1": 0.9619847798913618,
+      "baseline_macro_iou": 0.9302967800269789,
+      "baseline_worst_dataset_f1": 0.866183574879227,
+      "w3_macro_f1": 0.9583527113195413,
+      "w3_macro_iou": 0.923549632933714,
+      "w3_worst_dataset_f1": 0.8756833848347991
+    }
+  ],
+  "output": {
+    "decision": "no-go",
+    "reason": "no_repeatable_gain",
+    "w2_applicability": "NA: this branch is W3-on-seven-source-W1-P",
+    "rows": [
+      {
+        "seed": 0,
+        "support": "per-frame common direct observed-known",
+        "baseline_macro_f1": 0.9637042706855853,
+        "baseline_macro_iou": 0.9340790054226461,
+        "baseline_worst_dataset_f1": 0.8491803278688524,
+        "w3_macro_f1": 0.9603708822602909,
+        "w3_macro_iou": 0.9273179828191961,
+        "w3_worst_dataset_f1": 0.8639218422889045
+      },
+      {
+        "seed": 1,
+        "support": "per-frame common direct observed-known",
+        "baseline_macro_f1": 0.9619847798913618,
+        "baseline_macro_iou": 0.9302967800269789,
+        "baseline_worst_dataset_f1": 0.866183574879227,
+        "w3_macro_f1": 0.9583527113195413,
+        "w3_macro_iou": 0.923549632933714,
+        "w3_worst_dataset_f1": 0.8756833848347991
+      }
+    ],
+    "final_test_source_read": false
+  },
+  "seeds": [
+    0,
+    1
+  ],
+  "seed2": "not scheduled after registered no-go",
+  "checkpoint_weights_included": false,
+  "metric_support": "per-frame common observed-known calibration support",
+  "old_final_test": "sealed"
+}

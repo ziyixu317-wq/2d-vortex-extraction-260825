@@ -1,0 +1,85 @@
+{
+  "model": {
+    "NAME": "BaseSeg",
+    "encoder_args": {
+      "NAME": "PathlineTransformerV0",
+      "in_channels": 7,
+      "PathlineGroups": 64,
+      "KpathlinePerGroup": 4,
+      "num_classes": 1,
+      "num_encoder_layers": 3,
+      "dmodel": 144,
+      "k": 16,
+      "activation_checkpointing": true
+    },
+    "criterion_args": {
+      "NAME": "BCELoss"
+    }
+  },
+  "train": {
+    "epochs": 100,
+    "lr": 0.0001,
+    "weight_decay": 1E-06,
+    "warmup_epochs": 60,
+    "second_lr": 5E-06,
+    "grad_clip": 1.0,
+    "amp": false,
+    "data_parallel": false
+  },
+  "sampling": {
+    "samples_per_epoch": 20000,
+    "batch_size": 32,
+    "positive_fraction": 0.5,
+    "num_workers": 0,
+    "patch_size": [
+      32,
+      32
+    ],
+    "stride": [
+      16,
+      16
+    ],
+    "t_win": 24,
+    "window_step": 4,
+    "groups": [
+      8,
+      8
+    ],
+    "delta_frac": 0.05,
+    "L": 16,
+    "n_substeps": 4,
+    "t_scale": 0.25
+  },
+  "run_metadata": {
+    "created_on": "2026-10-10",
+    "scope": "Ticket16 development seven-source mixed W1-P",
+    "seed": 0,
+    "sources": [
+      "boussinesq",
+      "cylinder2d",
+      "doublegyre2d",
+      "fourcenters2d",
+      "jungtelziemniak2d",
+      "pipedcylinder2d",
+      "mfc_airfoil"
+    ],
+    "source_schedule": "homogeneous batches, start source = 2*epoch mod7",
+    "mfc_train_frames": [
+      0,
+      400
+    ],
+    "mfc_calibration_frames": [
+      400,
+      501
+    ],
+    "normalization": "independent train-only statistics for each source",
+    "legacy_incomplete_endpoint": "excluded from known labels, pseudo-labels and consistency",
+    "activation_checkpointing": "recompute deterministic KNN layers only, preserve RNG, same batch and sampling",
+    "probability_threshold_for_future_diagnostics": 0.1,
+    "variance_gate_for_future_three_view_diagnostics": 0.001,
+    "training_variance_gate": null,
+    "final_test_source_read": false,
+    "ticket11_run": false,
+    "integration_window_duration": "dt_out = actual stored end minus stored start, divided by L minus 1; same span used for normalization"
+  }
+}

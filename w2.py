@@ -24,6 +24,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import standard_ivd
 import weak_supervision_contract as contract
 from w1_h import W1HBatch, _validate_train_window_metadata
 from w1_p import (
@@ -47,7 +48,7 @@ W2_DEFAULT_PSEUDO_HIGH = 0.90
 W2_DEFAULT_PSEUDO_LOW = 0.10
 W2_ALLOWED_SAMPLING_SOURCES = frozenset({
     contract.LABEL_SOURCE_LEGACY_P85,
-    contract.LABEL_SOURCE_LOCAL_P90_P60,
+    contract.LABEL_SOURCE_P95P80,
 })
 
 
@@ -119,6 +120,10 @@ _TEST_ONLY_KEY_EXCEPTIONS = frozenset({
     # they do not carry test labels or metrics into a train/calibration seam.
     "failure_fallback_calibration_test",
     "haller_gt_test_artifact_read",
+    "test_policy",
+    "test_source_read",
+    "test_frame_indices_read",
+    "test_values_read",
 })
 
 _W2_CHECKPOINT_REQUIRED_METRICS = frozenset({
@@ -1137,6 +1142,14 @@ class W2Batch:
             raise ValueError("W2 anchor provenance source 必须是 haller_anchor_train")
         if anchor_provenance.get("anchor_hash") not in (None, self.anchor_hash):
             raise ValueError("W2 anchor provenance hash 与 batch anchor_hash 不一致")
+        if anchor_provenance.get("ivd_source_identity") != standard_ivd.SOURCE_IDENTITY:
+            raise ValueError(
+                "W2 anchor provenance 必须绑定当前 standard IVD source identity"
+            )
+        if anchor_provenance.get("ivd_formula") != standard_ivd.FORMULA:
+            raise ValueError(
+                "W2 anchor provenance 必须绑定当前 standard IVD formula"
+            )
         sampling_provenance = batch.provenance.get("sampling", {})
         if not isinstance(sampling_provenance, Mapping):
             raise ValueError("W2 sampling provenance 必须是 object")
@@ -1293,6 +1306,8 @@ def build_w2_batch(
     anchor = dict(sources.get("anchor", {}))
     anchor.setdefault("source", W2_LABEL_SOURCE)
     anchor.setdefault("anchor_hash", anchor_hash)
+    anchor.setdefault("ivd_source_identity", copy.deepcopy(standard_ivd.SOURCE_IDENTITY))
+    anchor.setdefault("ivd_formula", standard_ivd.FORMULA)
     sources["anchor"] = anchor
     sampling = dict(sources.get("sampling", {}))
     sampling.setdefault("source", sampling_source)
@@ -1713,6 +1728,14 @@ def _validate_checkpoint_anchor_metadata(
         raise ValueError(
             "W2 checkpoint Haller anchor metadata source 必须是 haller_anchor_train"
         )
+    if result.get("ivd_source_identity") != standard_ivd.SOURCE_IDENTITY:
+        raise ValueError(
+            "W2 checkpoint Haller anchor metadata 必须绑定当前 standard IVD source identity"
+        )
+    if result.get("ivd_formula") != standard_ivd.FORMULA:
+        raise ValueError(
+            "W2 checkpoint Haller anchor metadata 必须绑定当前 standard IVD formula"
+        )
     for field in ("algorithm_version", "parameter_hash", "input_hash", "mask_hash"):
         result[field] = _nonempty_text(
             result.get(field), name=f"anchor_metadata.{field}")
@@ -1795,6 +1818,12 @@ def _anchor_metadata_identity(metadata: Mapping[str, Any]) -> tuple[Any, ...]:
         normalized["source"],
         normalized["algorithm_version"],
         normalized["parameter_hash"],
+        json.dumps(
+            normalized["ivd_source_identity"],
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        normalized["ivd_formula"],
         json.dumps(literature, sort_keys=True, separators=(",", ":")),
         normalized["legacy_p85_used"],
         normalized["fallback_used"],

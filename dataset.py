@@ -36,6 +36,7 @@ import zlib
 import numpy as np
 
 import extractor
+import standard_ivd
 import weak_labels
 
 # --------------------------------------------------------------------------- 默认参数（HANDOFF §6）
@@ -68,6 +69,7 @@ VALID_WEAK_DATASETS = (
 )
 VALID_LABEL_SOURCES = (
     "legacy_p85",
+    standard_ivd.SOURCE_ID,
     "local_p90_p60",
     "haller_anchor_train",
     "haller_gt_calibration",
@@ -95,6 +97,8 @@ FN_V = "v.npy"
 FN_IVD = "ivd.npy"
 FN_LABEL = "label_field.npy"
 FN_MASK = "mask.npy"
+FN_VALID_FLUID_MASK = "valid_fluid_mask.npy"
+FN_INVALID_MASK = "invalid_mask.npy"
 FN_META = "meta.json"
 
 
@@ -240,6 +244,7 @@ def _weak_contract_payload(meta):
         "window": meta["window"],
         "feature_schema": meta["feature_schema"],
         "label_provenance": meta["label_provenance"],
+        "ivd_provenance": meta["ivd_provenance"],
         "normalization_source": meta["normalization_source"],
         "normalization": meta["normalization"],
     }
@@ -262,7 +267,7 @@ def _validate_weak_contract_metadata(meta, *, dataset_name, total_frames):
         "dataset_name", "split_mode", "slices", "split_ranges", "split_metadata",
         "window", "feature_schema", "label_provenance", "generation_version",
         "generation_hash", "contract_hash", "normalization_source",
-        "normalization_frozen",
+        "normalization_frozen", "ivd_provenance",
     )
     missing = [name for name in required if name not in meta]
     if missing:
@@ -404,6 +409,20 @@ def _validate_weak_contract_metadata(meta, *, dataset_name, total_frames):
             raise ValueError(
                 f"数据集 {dataset_name} 的 normalization {stat_name} 不一致"
             )
+
+    ivd_provenance = _metadata_dict(
+        meta, "ivd_provenance", dataset_name=dataset_name
+    )
+    if (
+        ivd_provenance.get("protocol_version") != standard_ivd.PROTOCOL_VERSION
+        or ivd_provenance.get("source_id") != standard_ivd.SOURCE_ID
+        or ivd_provenance.get("source_identity") != standard_ivd.SOURCE_IDENTITY
+        or ivd_provenance.get("formula") != standard_ivd.FORMULA
+        or ivd_provenance.get("mean_scope") != "declared_valid_fluid_support"
+    ):
+        raise ValueError(
+            f"数据集 {dataset_name} 的 ivd_provenance 不是当前 standard IVD source"
+        )
 
     schema = _metadata_dict(meta, "feature_schema", dataset_name=dataset_name)
     try:
@@ -648,6 +667,38 @@ def _mask_2d(mask, Y, X):
     return m
 
 
+def _mask_tyx(mask, T, Y, X, *, name):
+    """Coerce a declared support mask to a per-frame ``(T,Y,X)`` mask."""
+    if mask is None:
+        return None
+    if isinstance(mask, (str, pathlib.Path)):
+        value = np.load(str(mask), allow_pickle=False)
+    else:
+        value = np.asarray(mask)
+    value = np.asarray(value, dtype=bool)
+    if value.ndim == 2 and value.shape == (Y, X):
+        return np.broadcast_to(value, (T, Y, X)).copy()
+    if value.ndim == 3 and value.shape == (T, Y, X):
+        return value.copy()
+    raise ValueError(
+        f"{name} 必须是 (Y,X) 或 (T,Y,X)={(Y, X)}/{(T, Y, X)}，实际 {value.shape}"
+    )
+
+
+def _array_identity(value):
+    """Return a stable identity for a field without retaining its contents."""
+    array = np.asarray(value)
+    digest = hashlib.sha256()
+    digest.update(str(array.dtype).encode("ascii"))
+    digest.update(json.dumps(list(array.shape), separators=(",", ":")).encode("ascii"))
+    if array.ndim == 0:
+        digest.update(np.ascontiguousarray(array).tobytes())
+    else:
+        for start in range(0, int(array.shape[0]), 8):
+            digest.update(np.ascontiguousarray(array[start:start + 8]).tobytes(order="C"))
+    return digest.hexdigest()
+
+
 def _fit_slices(slices, T):
     """时间片截断到数据集帧数（子集数据集时：i1 截断到 T；i0 ≥ T 的片剔除）。
 
@@ -665,6 +716,7 @@ def _fit_slices(slices, T):
 def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
                     u=None, v=None, xdim=None, ydim=None, tdim=None,
                     mask=None, ivd=None, labels=None, min_area=weak_labels.DEFAULT_MIN_AREA,
+                    valid_fluid_mask=None, invalid_mask=None,
                     percentile=weak_labels.DEFAULT_PERCENTILE, taus=None, slices=None,
                     split_mode="abs", train_frac=0.6, val_frac=0.0,
                     speed_max=None, ivd_stats_slice="train", ivd_mu=None, ivd_sigma=None,
@@ -676,8 +728,9 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
 
     输入：nc_path（h5py 直读，中文路径可用；u/v 逐帧流式，不全量驻留）
     或内存数组 (u, v, xdim, ydim, tdim)（合成场/测试）。
-    复用/覆盖：mask（None=无固体；(Y,X) 或 (T,Y,X) 数组/路径）、ivd（None=自算，
-    数组/路径=复用票 04 产物）、labels（None=build_label_field）、taus（None=按
+    复用/覆盖：mask（None=无固体；(Y,X) 或 (T,Y,X) 数组/路径）、ivd（仅旧
+    ``abs``/``frac`` 历史模式可提供；weak_supervision 始终从 u/v 重算共享
+    standard IVD）、labels（None=build_label_field）、taus（None=按
     percentile 在流体区逐时间片统计——弱标签口径）。legacy ``abs``/``frac``
     保留旧 B0 口径；``weak_supervision`` 必须显式传 label source，并固定
     train/calibration/test 三段与 train-only normalization。
@@ -716,6 +769,11 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
     loss_label_source = validate_label_source(
         label_source if loss_label_source is None else loss_label_source)
     if split_mode == WEAK_SUPERVISION_SPLIT_MODE:
+        if ivd is not None:
+            raise ValueError(
+                "weak_supervision 不接受 provided/legacy IVD artifact；"
+                "必须从 u/v 计算 standard IVD shared source"
+            )
         if loss_label_source == "legacy_p85" and label_source != "legacy_p85":
             raise ValueError(
                 "legacy_p85 不能作为非 legacy label source 的 formal loss source"
@@ -789,11 +847,23 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
 
     # ---- 掩膜（先规格化：流式 IVD 计算需要）
     mask2d = _mask_2d(mask, Y, X)
+    valid_fluid_tyx = _mask_tyx(
+        valid_fluid_mask, T, Y, X, name="valid_fluid_mask"
+    )
+    invalid_tyx = _mask_tyx(invalid_mask, T, Y, X, name="invalid_mask")
+    if valid_fluid_tyx is not None and invalid_tyx is not None:
+        if np.any(valid_fluid_tyx & invalid_tyx):
+            raise ValueError("valid_fluid_mask 与 invalid_mask 不能重叠")
     np.save(out_dir / FN_MASK, mask2d.astype(np.uint8))
 
     speed_max_given = speed_max is not None
 
-    # ---- u/v/IVD：nc 流式 或 内存数组
+    # ---- u/v/standard IVD：nc 流式 或 内存数组
+    omega_bars = []
+    valid_fluid_counts = []
+    invalid_counts = []
+    input_frame_identities = []
+    standard_source = ivd is None
     if nc_path is not None:
         import h5py
         with h5py.File(str(nc_path), "r") as f:
@@ -801,27 +871,73 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
                                             dtype=np.float32, shape=(T, Y, X))
             vmm = np.lib.format.open_memmap(out_dir / FN_V, mode="w+",
                                             dtype=np.float32, shape=(T, Y, X))
-            reuse_ivd = ivd is not None and isinstance(ivd, (str, pathlib.Path))
-            if not reuse_ivd:
-                ivd_mm = np.lib.format.open_memmap(out_dir / FN_IVD, mode="w+",
-                                                   dtype=np.float32, shape=(T, Y, X))
+            ivd_mm = np.lib.format.open_memmap(out_dir / FN_IVD, mode="w+",
+                                               dtype=np.float32, shape=(T, Y, X))
+            valid_mm = np.lib.format.open_memmap(
+                out_dir / FN_VALID_FLUID_MASK, mode="w+",
+                dtype=np.uint8, shape=(T, Y, X)
+            )
+            invalid_mm = np.lib.format.open_memmap(
+                out_dir / FN_INVALID_MASK, mode="w+",
+                dtype=np.uint8, shape=(T, Y, X)
+            )
+            provided_ivd_mm = None
+            if not standard_source:
+                if not isinstance(ivd, (str, pathlib.Path)):
+                    raise ValueError(
+                        "nc_path 的 provided IVD 必须是独立的历史 .npy 路径；"
+                        "weak_supervision 不允许此路径"
+                    )
+                provided_ivd_mm = np.load(
+                    str(ivd), mmap_mode="r", allow_pickle=False
+                )
+                if tuple(provided_ivd_mm.shape) != (T, Y, X):
+                    raise ValueError(
+                        f"provided IVD shape={provided_ivd_mm.shape} != {(T, Y, X)}"
+                    )
             sp = 0.0
             for t in range(T):
                 ut = np.asarray(f["u"][t], dtype=np.float32)
                 vt = np.asarray(f["v"][t], dtype=np.float32)
                 umm[t] = ut
                 vmm[t] = vt
-                sp = max(sp, float(np.hypot(ut, vt).max()))
-                if not reuse_ivd:
-                    ivd_mm[t] = weak_labels.compute_ivd(
-                        ut[None], vt[None], xdim, ydim, mask=mask2d).astype(np.float32)[0]
-            umm.flush(); vmm.flush()
-            del umm, vmm
-            if not reuse_ivd:
-                ivd_mm.flush()
-                del ivd_mm
+                if standard_source:
+                    details = standard_ivd.compute_standard_ivd_details(
+                        ut, vt, xdim, ydim, solid_mask=mask2d,
+                        valid_fluid_mask=(
+                            None if valid_fluid_tyx is None else valid_fluid_tyx[t]
+                        ),
+                        invalid_mask=(
+                            None if invalid_tyx is None else invalid_tyx[t]
+                        ),
+                    )
+                    ivd_mm[t] = details.ivd.astype(np.float32)
+                    valid_mm[t] = details.valid_fluid_mask.astype(np.uint8)
+                    invalid_mm[t] = details.invalid_mask.astype(np.uint8)
+                    omega_bars.append(float(details.omega_bar))
+                    valid_fluid_counts.append(int(details.valid_fluid_mask.sum()))
+                    invalid_counts.append(int(details.invalid_mask.sum()))
+                    input_frame_identities.append(details.metadata["input_identity"])
+                else:
+                    source_ivd = np.asarray(provided_ivd_mm[t], dtype=np.float32)
+                    if source_ivd.shape != (Y, X):
+                        raise ValueError(
+                            f"provided IVD frame shape={source_ivd.shape} != {(Y, X)}"
+                        )
+                    ivd_mm[t] = source_ivd
+                    finite_support = (~mask2d) & np.isfinite(source_ivd)
+                    valid_mm[t] = finite_support.astype(np.uint8)
+                    invalid_mm[t] = ((~mask2d) & ~np.isfinite(source_ivd)).astype(np.uint8)
+                finite_speed = np.hypot(ut, vt)
+                finite_speed = finite_speed[np.isfinite(finite_speed)]
+                if finite_speed.size:
+                    sp = max(sp, float(finite_speed.max()))
+            umm.flush(); vmm.flush(); ivd_mm.flush(); valid_mm.flush(); invalid_mm.flush()
+            del umm, vmm, ivd_mm, valid_mm, invalid_mm
+            if provided_ivd_mm is not None:
+                del provided_ivd_mm
         speed_max = sp if speed_max is None else float(speed_max)
-        ivd_source = "computed_streaming" if not reuse_ivd else "provided"
+        ivd_source = "standard_ivd_shared_streaming" if standard_source else "provided_historical"
     else:
         umm = np.lib.format.open_memmap(out_dir / FN_U, mode="w+",
                                         dtype=np.float32, shape=(T, Y, X))
@@ -831,20 +947,49 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
         vmm[:] = v
         umm.flush(); vmm.flush()
         del umm, vmm
-        speed_max = float(np.hypot(u, v).max()) if speed_max is None else float(speed_max)
-        ivd_source = "computed_inmemory"
-        if ivd is not None:
-            ivd_arr = np.asarray(ivd, dtype=np.float32)[:T]
-            np.save(out_dir / FN_IVD, ivd_arr)
+        ivd_mm = np.lib.format.open_memmap(out_dir / FN_IVD, mode="w+",
+                                           dtype=np.float32, shape=(T, Y, X))
+        valid_mm = np.lib.format.open_memmap(
+            out_dir / FN_VALID_FLUID_MASK, mode="w+",
+            dtype=np.uint8, shape=(T, Y, X)
+        )
+        invalid_mm = np.lib.format.open_memmap(
+            out_dir / FN_INVALID_MASK, mode="w+",
+            dtype=np.uint8, shape=(T, Y, X)
+        )
+        if standard_source:
+            for t in range(T):
+                details = standard_ivd.compute_standard_ivd_details(
+                    u[t], v[t], xdim, ydim, solid_mask=mask2d,
+                    valid_fluid_mask=(
+                        None if valid_fluid_tyx is None else valid_fluid_tyx[t]
+                    ),
+                    invalid_mask=(None if invalid_tyx is None else invalid_tyx[t]),
+                )
+                ivd_mm[t] = details.ivd.astype(np.float32)
+                valid_mm[t] = details.valid_fluid_mask.astype(np.uint8)
+                invalid_mm[t] = details.invalid_mask.astype(np.uint8)
+                omega_bars.append(float(details.omega_bar))
+                valid_fluid_counts.append(int(details.valid_fluid_mask.sum()))
+                invalid_counts.append(int(details.invalid_mask.sum()))
+                input_frame_identities.append(details.metadata["input_identity"])
+            ivd_source = "standard_ivd_shared_inmemory"
         else:
-            np.save(out_dir / FN_IVD,
-                    weak_labels.compute_ivd(u, v, xdim, ydim, mask=mask2d).astype(np.float32))
-
-    # ---- IVD 复用路径（票 04 产物）
-    if ivd is not None and isinstance(ivd, (str, pathlib.Path)):
-        ivd_arr = np.asarray(np.load(str(ivd)), dtype=np.float32)[:T]
-        np.save(out_dir / FN_IVD, ivd_arr)
-        ivd_source = "provided"
+            ivd_arr = np.asarray(ivd, dtype=np.float32)
+            if ivd_arr.shape != (T, Y, X):
+                raise ValueError(
+                    f"provided IVD shape={ivd_arr.shape} != {(T, Y, X)}"
+                )
+            ivd_mm[:] = ivd_arr
+            valid_mm[:] = ((~mask2d)[None, ...] & np.isfinite(ivd_arr)).astype(np.uint8)
+            invalid_mm[:] = ((~mask2d)[None, ...] & ~np.isfinite(ivd_arr)).astype(np.uint8)
+            ivd_source = "provided_historical"
+        ivd_mm.flush(); valid_mm.flush(); invalid_mm.flush()
+        del ivd_mm, valid_mm, invalid_mm
+        finite_speed = np.hypot(u, v)
+        finite_speed = finite_speed[np.isfinite(finite_speed)]
+        speed_max = (float(finite_speed.max()) if finite_speed.size else 0.0) \
+            if speed_max is None else float(speed_max)
 
     # ---- 时间片与 τ
     if split_mode == "frac":
@@ -857,14 +1002,16 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
     if split_mode == WEAK_SUPERVISION_SPLIT_MODE and not speed_max_given:
         u_mm = np.load(out_dir / FN_U, mmap_mode="r")
         v_mm = np.load(out_dir / FN_V, mmap_mode="r")
+        valid_fluid_mm = np.load(out_dir / FN_VALID_FLUID_MASK, mmap_mode="r")
         i0, i1 = slices[NORMALIZATION_SOURCE]
         train_speed_max = 0.0
         for frame in range(i0, i1):
             speed = np.hypot(np.asarray(u_mm[frame]), np.asarray(v_mm[frame]))
-            fluid_speed = speed[~mask2d]
+            fluid_speed = speed[np.asarray(valid_fluid_mm[frame], dtype=bool)]
+            fluid_speed = fluid_speed[np.isfinite(fluid_speed)]
             if fluid_speed.size:
                 train_speed_max = max(train_speed_max, float(fluid_speed.max()))
-        del u_mm, v_mm
+        del u_mm, v_mm, valid_fluid_mm
         if train_speed_max <= 0.0:
             raise ValueError(
                 f"数据集 {dataset_name} train normalization 无有效正速度："
@@ -879,9 +1026,18 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
             f"数据集 {dataset_name} 缺少 normalization source {NORMALIZATION_SOURCE!r}"
         )
     ivd_mm = np.load(out_dir / FN_IVD, mmap_mode="r")
+    valid_fluid_mm = np.load(out_dir / FN_VALID_FLUID_MASK, mmap_mode="r")
+    invalid_mm = np.load(out_dir / FN_INVALID_MASK, mmap_mode="r")
     if taus is None:
-        # 流体区逐时间片分位数（弱标签口径：排除固体 0 值污染）
-        taus = weak_labels.compute_tau(ivd_mm, mask2d, slices, percentile=percentile)
+        # Per-split statistics use only the same valid-fluid support as IVD.
+        taus = weak_labels.compute_tau(
+            ivd_mm,
+            mask2d,
+            slices,
+            percentile=percentile,
+            valid_fluid_mask=valid_fluid_mm,
+            invalid_mask=invalid_mm,
+        )
     taus = {k: float(val) for k, val in taus.items()}
 
     # ---- 标签场（面积过滤 + 固体强制 0；复用 weak_labels 单一口径）
@@ -893,7 +1049,9 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
             np.save(out_dir / FN_LABEL, np.asarray(labels, dtype=np.uint8)[:T])
         else:
             lab = weak_labels.build_label_field(ivd_mm, mask2d, taus, slices,
-                                                min_area=min_area)
+                                                min_area=min_area,
+                                                valid_fluid_mask=valid_fluid_mm,
+                                                invalid_mask=invalid_mm)
             np.save(out_dir / FN_LABEL, lab)
 
     # ---- 归一化统计（IVD z-score：train 片流体区，σ=0 防护）
@@ -902,7 +1060,8 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
             i0, i1 = slices[NORMALIZATION_SOURCE]
         else:
             i0, i1 = slices.get(ivd_stats_slice, slices[next(iter(slices))])
-        vals = np.asarray(ivd_mm[i0:i1])[:, ~mask2d]
+        vals = np.asarray(ivd_mm[i0:i1])[np.asarray(valid_fluid_mm[i0:i1], dtype=bool)]
+        vals = vals[np.isfinite(vals)]
         if vals.size == 0:
             raise ValueError(f"统计片 {ivd_stats_slice} 无流体格")
         mu = float(vals.mean()) if ivd_mu is None else float(ivd_mu)
@@ -911,7 +1070,81 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
             sg = 0.0
     else:
         mu, sg = float(ivd_mu), float(ivd_sigma)
-    del ivd_mm
+    del ivd_mm, valid_fluid_mm, invalid_mm
+
+    # The source identity is separate from the label source: every standard
+    # IVD consumer can compare this fixed Ticket 01 identity while retaining
+    # its own train/calibration sampling role.
+    stored_u = np.load(out_dir / FN_U, mmap_mode="r", allow_pickle=False)
+    stored_v = np.load(out_dir / FN_V, mmap_mode="r", allow_pickle=False)
+    field_identity = _json_hash({
+        "u": _array_identity(stored_u),
+        "v": _array_identity(stored_v),
+        "xdim": _array_identity(xdim),
+        "ydim": _array_identity(ydim),
+        "tdim": _array_identity(tdim),
+    })
+    del stored_u, stored_v
+    if standard_source:
+        spacing = {
+            "dx": float(xdim[1] - xdim[0]),
+            "dy": float(ydim[1] - ydim[0]),
+        }
+        ivd_provenance = {
+            "protocol_version": standard_ivd.PROTOCOL_VERSION,
+            "source_id": standard_ivd.SOURCE_ID,
+            "source_identity": standard_ivd.SOURCE_IDENTITY,
+            "artifact_identity": standard_ivd.SOURCE_IDENTITY["artifact_identity"],
+            "definition_id": standard_ivd.FORMULA_VERSION,
+            "formula_version": standard_ivd.FORMULA_VERSION,
+            "formula": standard_ivd.FORMULA,
+            "ivd_formula": standard_ivd.FORMULA,
+            "mean_scope": "declared_valid_fluid_support",
+            "mean_quantity": "signed omega",
+            "input_field_identity": field_identity,
+            "input_frame_identity_by_frame": list(input_frame_identities),
+            "spacing": spacing,
+            "grid_spacing": spacing,
+            "omega_bar_by_frame": [float(value) for value in omega_bars],
+            "valid_fluid_counts_by_frame": [int(value) for value in valid_fluid_counts],
+            "invalid_counts_by_frame": [int(value) for value in invalid_counts],
+            "valid_fluid_mask_semantics": (
+                "declared_valid_fluid_support intersect finite_omega and non_solid"
+            ),
+            "solid_mask_semantics": (
+                "solid cells are excluded from omega_bar and label support; "
+                "solid is not a valid negative"
+            ),
+            "invalid_mask_semantics": (
+                "non-finite omega, explicit invalid, or outside declared valid-fluid "
+                "support; excluded from omega_bar and label support"
+            ),
+            "storage_semantics": {
+                "solid": "zero_for_artifact_storage_only",
+                "invalid": "zero_for_artifact_storage_only",
+                "consumer_must_use_masks": True,
+            },
+            "provenance": {
+                "module": "standard_ivd",
+                "entry_point": "standard_ivd.compute_standard_ivd_details",
+                "implementation_version": standard_ivd.IMPLEMENTATION_VERSION,
+                "per_frame": True,
+                "difference_scheme": {
+                    "vorticity": "d(v)/d(x) - d(u)/d(y)",
+                    "interior": "second_order_centered",
+                    "boundary": "first_order_one_sided",
+                },
+            },
+        }
+    else:
+        ivd_provenance = {
+            "protocol_version": "historical",
+            "source_id": "provided_historical",
+            "source_identity": None,
+            "legacy_artifact_formal_source": False,
+            "input_field_identity": field_identity,
+            "note": "历史模式仅保留 provided IVD；weak_supervision 不允许此路径",
+        }
 
     # ---- 可审计的 split/window/provenance 合同
     split_ranges = {k: [int(a), int(b)] for k, (a, b) in slices.items()}
@@ -958,6 +1191,7 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
         "window": window_meta,
         "feature_schema": feature_schema,
         "label_provenance": label_provenance,
+        "ivd_provenance": ivd_provenance,
         "normalization_source": NORMALIZATION_SOURCE,
         "normalization": {
             "source_split": NORMALIZATION_SOURCE,
@@ -990,6 +1224,7 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
         "sampling_source": sampling_source,
         "loss_label_source": loss_label_source,
         "label_provenance": label_provenance,
+        "ivd_provenance": ivd_provenance,
         "generation_version": GENERATION_VERSION,
         "generation_hash": contract_hash,
         "contract_hash": contract_hash,
@@ -1016,6 +1251,12 @@ def prepare_dataset(nc_path=None, out_dir="outputs/dataset", *,
         "ivd_source": ivd_source,
         "mask_source": "none" if not mask2d.any() else "provided_or_computed",
         "mask_solid_cells": int(mask2d.sum()),
+        "valid_fluid_mask_source": (
+            "standard_ivd_shared" if standard_source else "provided_ivd_finite_support"
+        ),
+        "invalid_mask_source": (
+            "standard_ivd_shared" if standard_source else "provided_ivd_nonfinite_support"
+        ),
         "params": {
             "patch_size": [int(p) for p in patch_size],
             "stride": [int(s) for s in stride],
@@ -1088,6 +1329,11 @@ class _DatasetStore:
         if self.is_weak_supervision:
             _validate_weak_contract_metadata(
                 self._meta, dataset_name=self.dataset_name, total_frames=self.T)
+        self.ivd_provenance = self._meta.get("ivd_provenance")
+        if self.is_weak_supervision and not isinstance(self.ivd_provenance, dict):
+            raise ValueError(
+                f"数据集 {self.dataset_name} 缺少 standard IVD provenance"
+            )
         self._xdim = np.asarray(self._meta["xdim"], dtype=np.float64)
         self._ydim = np.asarray(self._meta["ydim"], dtype=np.float64)
         self._tdim = np.asarray(self._meta["tdim"], dtype=np.float64)
@@ -1163,6 +1409,44 @@ class _DatasetStore:
         self._ivd_mm = np.load(root / FN_IVD, mmap_mode="r")
         self._label_mm = np.load(root / FN_LABEL, mmap_mode="r")
         self._mask2d = np.asarray(np.load(root / FN_MASK), dtype=bool)
+        valid_fluid_path = root / FN_VALID_FLUID_MASK
+        invalid_path = root / FN_INVALID_MASK
+        if self.is_weak_supervision and (
+            not valid_fluid_path.exists() or not invalid_path.exists()
+        ):
+            raise ValueError(
+                f"数据集 {self.dataset_name} 缺少 standard IVD mask artifact："
+                f"需要 {FN_VALID_FLUID_MASK} 和 {FN_INVALID_MASK}"
+            )
+        if valid_fluid_path.exists():
+            self._valid_fluid_mm = np.load(valid_fluid_path, mmap_mode="r")
+        else:
+            self._valid_fluid_mm = np.broadcast_to(
+                (~self._mask2d)[None, ...], (self.T, self.Y, self.X)
+            )
+        if invalid_path.exists():
+            self._invalid_mm = np.load(invalid_path, mmap_mode="r")
+        else:
+            self._invalid_mm = np.zeros((self.T, self.Y, self.X), dtype=bool)
+        for name, value in (
+            (FN_VALID_FLUID_MASK, self._valid_fluid_mm),
+            (FN_INVALID_MASK, self._invalid_mm),
+        ):
+            if tuple(value.shape) != (self.T, self.Y, self.X):
+                raise ValueError(
+                    f"数据集 {self.dataset_name} {name} shape={value.shape} "
+                    f"!= {(self.T, self.Y, self.X)}"
+                )
+            if value.dtype not in (np.dtype(np.uint8), np.dtype(bool)):
+                raise ValueError(
+                    f"数据集 {self.dataset_name} {name} dtype={value.dtype} "
+                    "必须是 uint8/bool"
+                )
+        if np.any(np.asarray(self._valid_fluid_mm, dtype=bool)
+                  & np.asarray(self._invalid_mm, dtype=bool)):
+            raise ValueError(
+                f"数据集 {self.dataset_name} valid_fluid_mask 与 invalid_mask 重叠"
+            )
         self._patches = patch_locations(self.Y, self.X, self.patch_size, self.stride)
         self.pool_positive, self.pool_negative = self._build_pools()
 
@@ -1306,6 +1590,18 @@ class _DatasetStore:
                 split_name=self.split, T=self.T)
         else:
             frame = int(frame)
+        frame_omega_bar = None
+        frame_input_identity = None
+        if isinstance(self.ivd_provenance, dict):
+            omega_bars = self.ivd_provenance.get("omega_bar_by_frame", ())
+            if isinstance(omega_bars, (list, tuple)) and 0 <= frame < len(omega_bars):
+                frame_omega_bar = float(omega_bars[frame])
+            input_identities = self.ivd_provenance.get(
+                "input_frame_identity_by_frame", ()
+            )
+            if (isinstance(input_identities, (list, tuple))
+                    and 0 <= frame < len(input_identities)):
+                frame_input_identity = input_identities[frame]
         return {
             "dataset_name": self.dataset_name,
             "split_name": self.split,
@@ -1321,6 +1617,10 @@ class _DatasetStore:
             "feature_schema": self._meta.get("feature_schema"),
             "label_source": self.label_source,
             "label_provenance": self._meta.get("label_provenance"),
+            "ivd_source": self._meta.get("ivd_source"),
+            "ivd_provenance": self.ivd_provenance,
+            "ivd_omega_bar": frame_omega_bar,
+            "ivd_input_identity": frame_input_identity,
             "normalization_source": self._meta.get("normalization_source"),
             "normalization_frozen": self._meta.get("normalization_frozen"),
         }

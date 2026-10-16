@@ -6,10 +6,13 @@ physical ``(x, y)`` contour points plus the selected maximum.  The adapter
 converts those points to this repository's ``(row, col)`` artifact convention
 and reuses the existing three-state rasterization and artifact writer.
 
-Formal artifacts use the native upstream call contract: only the physical
-radius ``r``, ``convexity_deficiency`` and ``min_len`` are supplied.  The
-upstream defaults for ``min_val``, ``nlevs``, ``start_level`` and ``end_level``
-remain authoritative.  In particular, this module deliberately contains no
+Native artifacts use an explicitly versioned NumbaCS execution contract.  The
+qualified historical default is ``nlevs=3``; the current Ticket 04 runner
+selects the separate ``nlevs=32`` contract.  Both are engineering parameters,
+not canonical paper parameters.  The physical radius ``r``, ``nlevs``,
+``convexity_deficiency`` and ``min_len`` are supplied, while the upstream
+defaults for ``min_val``, ``start_level`` and ``end_level`` remain
+authoritative.  In particular, this module deliberately contains no
 replacement maximum finder, no no-JIT compatibility path and no CUDA Haller
 backend.
 """
@@ -32,7 +35,12 @@ import haller_anchors as strict
 BACKEND_NUMBACS = "numbacs"
 UPSTREAM_VERSION = "0.2.0"
 UPSTREAM_COMMIT = "c067f542543f5dd4ae3dc45fc506213e8d98b845"
-BACKEND_VERSION = f"numbacs-{UPSTREAM_VERSION}+{UPSTREAM_COMMIT[:12]}"
+FORMAL_NLEVS = strict.NUMBACS_FORMAL_NLEVS
+FORMAL_PARAMETER_VERSION = strict.NUMBACS_FORMAL_PARAMETER_VERSION
+BACKEND_VERSION = strict.NUMBACS_BACKEND_VERSION
+TICKET04_NLEVS = strict.NUMBACS_TICKET04_NLEVS
+TICKET04_PARAMETER_VERSION = strict.NUMBACS_TICKET04_PARAMETER_VERSION
+TICKET04_BACKEND_VERSION = strict.NUMBACS_TICKET04_BACKEND_VERSION
 UPSTREAM_DEFAULT_MIN_VAL = -1.0
 UPSTREAM_DEFAULT_NLEVS = 20
 UPSTREAM_DEFAULT_START_LEVEL = 0.0
@@ -132,17 +140,27 @@ def _physical_to_grid(
 def _empty_evaluation(
     *,
     radius: float,
+    radius_factor: float = 1.0,
     reason: str,
+    nlevs: int,
+    parameter_version: str,
 ) -> dict[str, Any]:
     return {
-        "numbacs_requested_level_count": UPSTREAM_DEFAULT_NLEVS,
+        "numbacs_requested_level_count": int(nlevs),
+        "numbacs_nlevs": int(nlevs),
+        "numbacs_parameter_version": parameter_version,
+        "numbacs_formal_nlevs": FORMAL_NLEVS,
+        "numbacs_formal_parameter_version": FORMAL_PARAMETER_VERSION,
         "numbacs_contour_level_schedule": "upstream_linspace_percentile70_to_max",
         "numbacs_runtime_mode": runtime_mode(),
         "numbacs_radius": float(radius),
+        "numbacs_radius_factor": float(radius_factor),
         "numbacs_native_call": True,
-        "numbacs_explicit_kwargs": ["convexity_deficiency", "min_len"],
+        "numbacs_explicit_kwargs": [
+            "nlevs", "convexity_deficiency", "min_len"
+        ],
         "numbacs_omitted_kwargs": [
-            "min_val", "nlevs", "start_level", "end_level"
+            "min_val", "start_level", "end_level"
         ],
         "numbacs_default_min_val": UPSTREAM_DEFAULT_MIN_VAL,
         "numbacs_default_nlevs": UPSTREAM_DEFAULT_NLEVS,
@@ -166,6 +184,8 @@ def select_contours(
     dx: float,
     dy: float,
     *,
+    nlevs: int = FORMAL_NLEVS,
+    parameter_version: str = FORMAL_PARAMETER_VERSION,
     return_evaluation: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | tuple[
     list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]
@@ -178,6 +198,15 @@ def select_contours(
     radius-based maximum removal, and convex-hull boundary output.  Those
     choices are recorded in the returned evaluation and artifact parameters.
     """
+    try:
+        nlevs = int(nlevs)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("numbacs nlevs 必须是整数") from exc
+    if nlevs < 2:
+        raise ValueError("numbacs nlevs 必须至少为 2")
+    parameter_version = str(parameter_version)
+    if not parameter_version or any(char in parameter_version for char in "\r\n"):
+        raise ValueError("numbacs parameter_version 必须是非空单行字符串")
     field = np.asarray(ivd, dtype=np.float64)
     solid_array = np.asarray(solid, dtype=bool)
     x = np.asarray(xdim, dtype=np.float64)
@@ -188,8 +217,7 @@ def select_contours(
         raise ValueError("numbacs 坐标轴与 IVD shape 不匹配")
 
     forbidden_overrides = (
-        "numbacs_min_val", "numbacs_nlevs", "numbacs_start_level",
-        "numbacs_end_level",
+        "numbacs_min_val", "numbacs_start_level", "numbacs_end_level",
     )
     stale = [key for key in forbidden_overrides if key in params]
     if stale:
@@ -197,15 +225,22 @@ def select_contours(
             "formal NumbaCS rotcohvrt 禁止覆盖 upstream defaults："
             f"{stale!r}"
         )
-    radius = max(float(dx), float(dy))
-    if not np.isfinite(radius) or radius <= 0.0:
+    base_radius = max(float(dx), float(dy))
+    radius_factor = float(params.get("numbacs_radius_factor", 1.0))
+    if not np.isfinite(radius_factor) or radius_factor <= 0.0:
+        raise ValueError("numbacs radius_factor 必须为正")
+    radius = base_radius * radius_factor
+    if not np.isfinite(base_radius) or base_radius <= 0.0:
         raise ValueError("numbacs radius 必须为正")
 
     fluid = ~solid_array
     if not np.any(fluid):
         evaluation = _empty_evaluation(
             radius=radius,
+            radius_factor=radius_factor,
             reason="all_solid",
+            nlevs=nlevs,
+            parameter_version=parameter_version,
         )
         return ([], [], evaluation) if return_evaluation else ([], [])
     positive = field[fluid]
@@ -213,7 +248,10 @@ def select_contours(
     if positive.size == 0 or float(np.max(field)) <= upstream_min_val:
         evaluation = _empty_evaluation(
             radius=radius,
+            radius_factor=radius_factor,
             reason="no_maximum_above_min_val",
+            nlevs=nlevs,
+            parameter_version=parameter_version,
         )
         return ([], [], evaluation) if return_evaluation else ([], [])
 
@@ -221,14 +259,15 @@ def select_contours(
     # NumbaCS uses (nx, ny) = (x, y), while this project stores arrays as
     # (row, col) = (y, x).  Its own implementation transposes the field back
     # into the ContourPy convention, so the transpose here is intentional.
-    # Keep this call intentionally native.  Omitting the four optional search
-    # arguments is part of the formal artifact identity and is guarded by the
-    # adapter tests.
+    # Keep this call intentionally native.  The caller-selected nlevs is part
+    # of the versioned artifact identity; min_val, start_level, and end_level
+    # remain upstream defaults and are intentionally omitted.
     upstream_result = rotcohvrt(
         np.asarray(field.T, dtype=np.float64),
         x,
         y,
         radius,
+        nlevs=nlevs,
         convexity_deficiency=float(params["convexity_defect_max"]),
         min_len=float(params["minimum_perimeter_factor"]) * max(float(dx), float(dy)),
     )
@@ -288,15 +327,21 @@ def select_contours(
         diagnostics.append(dict(record))
 
     evaluation = {
-        "numbacs_requested_level_count": UPSTREAM_DEFAULT_NLEVS,
+        "numbacs_requested_level_count": int(nlevs),
+        "numbacs_nlevs": int(nlevs),
+        "numbacs_parameter_version": parameter_version,
+        "numbacs_formal_nlevs": FORMAL_NLEVS,
+        "numbacs_formal_parameter_version": FORMAL_PARAMETER_VERSION,
         "numbacs_contour_level_schedule": "upstream_linspace_percentile70_to_max",
         "numbacs_runtime_mode": runtime_mode(),
         "numbacs_radius": radius,
-        "numbacs_radius_factor": 1.0,
+        "numbacs_radius_factor": radius_factor,
         "numbacs_native_call": True,
-        "numbacs_explicit_kwargs": ["convexity_deficiency", "min_len"],
+        "numbacs_explicit_kwargs": [
+            "nlevs", "convexity_deficiency", "min_len"
+        ],
         "numbacs_omitted_kwargs": [
-            "min_val", "nlevs", "start_level", "end_level"
+            "min_val", "start_level", "end_level"
         ],
         "numbacs_default_min_val": UPSTREAM_DEFAULT_MIN_VAL,
         "numbacs_default_nlevs": UPSTREAM_DEFAULT_NLEVS,
@@ -323,6 +368,11 @@ def select_contours(
 __all__ = [
     "BACKEND_NUMBACS",
     "BACKEND_VERSION",
+    "FORMAL_NLEVS",
+    "FORMAL_PARAMETER_VERSION",
+    "TICKET04_BACKEND_VERSION",
+    "TICKET04_NLEVS",
+    "TICKET04_PARAMETER_VERSION",
     "UPSTREAM_DEFAULT_END_LEVEL",
     "UPSTREAM_DEFAULT_MIN_VAL",
     "UPSTREAM_DEFAULT_NLEVS",

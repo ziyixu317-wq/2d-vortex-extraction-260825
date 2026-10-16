@@ -1,0 +1,3961 @@
+{
+  "method": "W1-P",
+  "seed": 1,
+  "method_role": "Ticket10 unconditional development method",
+  "auxiliary_branch": null,
+  "checkpoint": "epoch_0100.pt",
+  "global_step": 39100,
+  "completed_epochs": 100,
+  "sampling_stages": [
+    {
+      "start_epoch": 0,
+      "end_epoch": 25,
+      "epoch_range": [
+        0,
+        25
+      ],
+      "batch_size": 32,
+      "sampling_config": {
+        "source": "standard_ivd_valid_fluid_p95_p80",
+        "statistics_split": "train",
+        "samples_per_epoch": 20000,
+        "batch_size": 32,
+        "positive_fraction": 0.5,
+        "patch_size": [
+          32,
+          32
+        ],
+        "stride": [
+          16,
+          16
+        ],
+        "t_win": 24,
+        "window_step": 4,
+        "groups": [
+          8,
+          8
+        ],
+        "delta_frac": 0.05,
+        "L": 16,
+        "n_substeps": 4,
+        "t_scale": 0.25,
+        "pool_definition": "current Ticket 03 train positive_mask patch membership",
+        "same_frame_batch_window": true,
+        "connected_component_filter_is_outside_ivd": true,
+        "source_schedule": "batch_round_robin_epoch_remainder_rotation",
+        "source_count": 7,
+        "legacy_incomplete_endpoint_policy": "exclude_known_pseudo_consistency",
+        "num_workers": 0
+      },
+      "updates_per_epoch": 625,
+      "last_batch_size": 32
+    },
+    {
+      "start_epoch": 25,
+      "end_epoch": 100,
+      "epoch_range": [
+        25,
+        100
+      ],
+      "batch_size": 64,
+      "sampling_config": {
+        "source": "standard_ivd_valid_fluid_p95_p80",
+        "statistics_split": "train",
+        "samples_per_epoch": 20000,
+        "batch_size": 64,
+        "positive_fraction": 0.5,
+        "patch_size": [
+          32,
+          32
+        ],
+        "stride": [
+          16,
+          16
+        ],
+        "t_win": 24,
+        "window_step": 4,
+        "groups": [
+          8,
+          8
+        ],
+        "delta_frac": 0.05,
+        "L": 16,
+        "n_substeps": 4,
+        "t_scale": 0.25,
+        "pool_definition": "current Ticket 03 train positive_mask patch membership",
+        "same_frame_batch_window": true,
+        "connected_component_filter_is_outside_ivd": true,
+        "source_schedule": "batch_round_robin_epoch_remainder_rotation",
+        "source_count": 7,
+        "legacy_incomplete_endpoint_policy": "exclude_known_pseudo_consistency",
+        "num_workers": 0
+      },
+      "updates_per_epoch": 313,
+      "last_batch_size": 32
+    }
+  ],
+  "inference_batch_size": 16,
+  "model_views": "one stochastic grouping view per frame; Torch seed from [seed, source_id, split_id, frame]",
+  "threshold": 0.1,
+  "frames": [
+    {
+      "name": "boussinesq",
+      "source_id": 0,
+      "split": "train",
+      "frame": 500,
+      "selected_patch_count": 64,
+      "available_patch_count": 215,
+      "model_view_seed": 2154239279,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 16,
+      "failed_rate": 0.0009765625,
+      "elapsed_seconds": 4.529453566065058,
+      "metrics": {
+        "tp": 661,
+        "fp": 16,
+        "fn": 14,
+        "tn": 8868,
+        "observed_known": 9559,
+        "precision": 0.9763663220088626,
+        "recall": 0.9792592592592593,
+        "f1": 0.977810650887574,
+        "iou": 0.9565846599131693,
+        "auprc": 0.9972942896272218
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 67258,
+            "covered": 11467,
+            "missing": 55791,
+            "coverage": 0.17049272948942876
+          },
+          "known_positive": {
+            "total": 2988,
+            "covered": 675,
+            "missing": 2313,
+            "coverage": 0.22590361445783133
+          },
+          "known_negative": {
+            "total": 54217,
+            "covered": 8884,
+            "missing": 45333,
+            "coverage": 0.16386004389767048
+          },
+          "unknown": {
+            "total": 10053,
+            "covered": 1908,
+            "missing": 8145,
+            "coverage": 0.18979409131602507
+          },
+          "solid": {
+            "total": 242,
+            "covered": 0,
+            "missing": 242,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 67500,
+        "direct_prediction_count": 16368,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 2313
+      }
+    },
+    {
+      "name": "boussinesq",
+      "source_id": 0,
+      "split": "train",
+      "frame": 744,
+      "selected_patch_count": 64,
+      "available_patch_count": 215,
+      "model_view_seed": 3234129797,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 17,
+      "failed_rate": 0.00103759765625,
+      "elapsed_seconds": 3.382612230023369,
+      "metrics": {
+        "tp": 977,
+        "fp": 9,
+        "fn": 33,
+        "tn": 7468,
+        "observed_known": 8487,
+        "precision": 0.9908722109533469,
+        "recall": 0.9673267326732673,
+        "f1": 0.9789579158316634,
+        "iou": 0.9587831207065751,
+        "auprc": 0.9983460386250778
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 67258,
+            "covered": 11464,
+            "missing": 55794,
+            "coverage": 0.17044812513009605
+          },
+          "known_positive": {
+            "total": 5241,
+            "covered": 1010,
+            "missing": 4231,
+            "coverage": 0.19271131463461172
+          },
+          "known_negative": {
+            "total": 45973,
+            "covered": 7477,
+            "missing": 38496,
+            "coverage": 0.16263894024753658
+          },
+          "unknown": {
+            "total": 16044,
+            "covered": 2977,
+            "missing": 13067,
+            "coverage": 0.18555223136374968
+          },
+          "solid": {
+            "total": 242,
+            "covered": 0,
+            "missing": 242,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 67500,
+        "direct_prediction_count": 16367,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 4231
+      }
+    },
+    {
+      "name": "boussinesq",
+      "source_id": 0,
+      "split": "train",
+      "frame": 748,
+      "selected_patch_count": 64,
+      "available_patch_count": 215,
+      "model_view_seed": 1252265024,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 16,
+      "failed_rate": 0.0009765625,
+      "elapsed_seconds": 3.3698166330577806,
+      "metrics": {
+        "tp": 969,
+        "fp": 9,
+        "fn": 47,
+        "tn": 7434,
+        "observed_known": 8459,
+        "precision": 0.99079754601227,
+        "recall": 0.9537401574803149,
+        "f1": 0.9719157472417251,
+        "iou": 0.9453658536585365,
+        "auprc": 0.9953243491528329
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 67258,
+            "covered": 11465,
+            "missing": 55793,
+            "coverage": 0.17046299324987363
+          },
+          "known_positive": {
+            "total": 5288,
+            "covered": 1016,
+            "missing": 4272,
+            "coverage": 0.19213313161875945
+          },
+          "known_negative": {
+            "total": 45794,
+            "covered": 7443,
+            "missing": 38351,
+            "coverage": 0.16253220945975455
+          },
+          "unknown": {
+            "total": 16176,
+            "covered": 3006,
+            "missing": 13170,
+            "coverage": 0.18583086053412462
+          },
+          "solid": {
+            "total": 242,
+            "covered": 0,
+            "missing": 242,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 67500,
+        "direct_prediction_count": 16368,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 4272
+      }
+    },
+    {
+      "name": "boussinesq",
+      "source_id": 0,
+      "split": "calibration",
+      "frame": 1000,
+      "selected_patch_count": 64,
+      "available_patch_count": 215,
+      "model_view_seed": 1037923453,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 18,
+      "failed_rate": 0.0010986328125,
+      "elapsed_seconds": 3.4383629750227556,
+      "metrics": {
+        "tp": 1585,
+        "fp": 22,
+        "fn": 216,
+        "tn": 6011,
+        "observed_known": 7834,
+        "precision": 0.9863098942128189,
+        "recall": 0.8800666296501943,
+        "f1": 0.9301643192488263,
+        "iou": 0.8694459681843115,
+        "auprc": 0.9941491524675076
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 67258,
+            "covered": 11465,
+            "missing": 55793,
+            "coverage": 0.17046299324987363
+          },
+          "known_positive": {
+            "total": 8861,
+            "covered": 1801,
+            "missing": 7060,
+            "coverage": 0.20325019749463943
+          },
+          "known_negative": {
+            "total": 38671,
+            "covered": 6033,
+            "missing": 32638,
+            "coverage": 0.15600837837138942
+          },
+          "unknown": {
+            "total": 19726,
+            "covered": 3631,
+            "missing": 16095,
+            "coverage": 0.18407178343303254
+          },
+          "solid": {
+            "total": 242,
+            "covered": 0,
+            "missing": 242,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 67500,
+        "direct_prediction_count": 16366,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 7060
+      }
+    },
+    {
+      "name": "boussinesq",
+      "source_id": 0,
+      "split": "calibration",
+      "frame": 1100,
+      "selected_patch_count": 64,
+      "available_patch_count": 215,
+      "model_view_seed": 124039010,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 25,
+      "failed_rate": 0.00152587890625,
+      "elapsed_seconds": 3.4023211649619043,
+      "metrics": {
+        "tp": 1729,
+        "fp": 20,
+        "fn": 291,
+        "tn": 5517,
+        "observed_known": 7557,
+        "precision": 0.9885648942252716,
+        "recall": 0.8559405940594059,
+        "f1": 0.9174847439639161,
+        "iou": 0.8475490196078431,
+        "auprc": 0.989621223716226
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 67258,
+            "covered": 11454,
+            "missing": 55804,
+            "coverage": 0.17029944393232033
+          },
+          "known_positive": {
+            "total": 10248,
+            "covered": 2020,
+            "missing": 8228,
+            "coverage": 0.19711163153786104
+          },
+          "known_negative": {
+            "total": 35673,
+            "covered": 5537,
+            "missing": 30136,
+            "coverage": 0.15521542903596558
+          },
+          "unknown": {
+            "total": 21337,
+            "covered": 3897,
+            "missing": 17440,
+            "coverage": 0.18264048366686975
+          },
+          "solid": {
+            "total": 242,
+            "covered": 0,
+            "missing": 242,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 67500,
+        "direct_prediction_count": 16359,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 8228
+      }
+    },
+    {
+      "name": "boussinesq",
+      "source_id": 0,
+      "split": "calibration",
+      "frame": 1176,
+      "selected_patch_count": 64,
+      "available_patch_count": 215,
+      "model_view_seed": 1311566900,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 31,
+      "failed_rate": 0.00189208984375,
+      "elapsed_seconds": 3.4318858140613884,
+      "metrics": {
+        "tp": 1862,
+        "fp": 28,
+        "fn": 269,
+        "tn": 5180,
+        "observed_known": 7339,
+        "precision": 0.9851851851851852,
+        "recall": 0.8737681839511966,
+        "f1": 0.9261377766724695,
+        "iou": 0.8624363131079203,
+        "auprc": 0.9918403239727349
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 67258,
+            "covered": 11450,
+            "missing": 55808,
+            "coverage": 0.17023997145321002
+          },
+          "known_positive": {
+            "total": 10333,
+            "covered": 2131,
+            "missing": 8202,
+            "coverage": 0.20623245911158425
+          },
+          "known_negative": {
+            "total": 33361,
+            "covered": 5208,
+            "missing": 28153,
+            "coverage": 0.15611042834447408
+          },
+          "unknown": {
+            "total": 23564,
+            "covered": 4111,
+            "missing": 19453,
+            "coverage": 0.17446104226786624
+          },
+          "solid": {
+            "total": 242,
+            "covered": 0,
+            "missing": 242,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 67500,
+        "direct_prediction_count": 16353,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 8202
+      }
+    },
+    {
+      "name": "cylinder2d",
+      "source_id": 1,
+      "split": "train",
+      "frame": 376,
+      "selected_patch_count": 64,
+      "available_patch_count": 156,
+      "model_view_seed": 1816598126,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 326,
+      "failed_rate": 0.0198974609375,
+      "elapsed_seconds": 3.2607640449423343,
+      "metrics": {
+        "tp": 693,
+        "fp": 5,
+        "fn": 14,
+        "tn": 9109,
+        "observed_known": 9821,
+        "precision": 0.9928366762177651,
+        "recall": 0.9801980198019802,
+        "f1": 0.9864768683274021,
+        "iou": 0.973314606741573,
+        "auprc": 0.9991872379202121
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 51140,
+            "covered": 11715,
+            "missing": 39425,
+            "coverage": 0.22907704341024637
+          },
+          "known_positive": {
+            "total": 2317,
+            "covered": 707,
+            "missing": 1610,
+            "coverage": 0.30513595166163143
+          },
+          "known_negative": {
+            "total": 42076,
+            "covered": 9114,
+            "missing": 32962,
+            "coverage": 0.21660804258959976
+          },
+          "unknown": {
+            "total": 6747,
+            "covered": 1894,
+            "missing": 4853,
+            "coverage": 0.2807173558618645
+          },
+          "solid": {
+            "total": 60,
+            "covered": 0,
+            "missing": 60,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 51200,
+        "direct_prediction_count": 16058,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 1610
+      }
+    },
+    {
+      "name": "cylinder2d",
+      "source_id": 1,
+      "split": "train",
+      "frame": 700,
+      "selected_patch_count": 64,
+      "available_patch_count": 156,
+      "model_view_seed": 3499310952,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 326,
+      "failed_rate": 0.0198974609375,
+      "elapsed_seconds": 3.268685242976062,
+      "metrics": {
+        "tp": 1447,
+        "fp": 5,
+        "fn": 49,
+        "tn": 5651,
+        "observed_known": 7152,
+        "precision": 0.9965564738292011,
+        "recall": 0.9672459893048129,
+        "f1": 0.9816824966078698,
+        "iou": 0.9640239840106596,
+        "auprc": 0.9976888511498019
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 51140,
+            "covered": 11712,
+            "missing": 39428,
+            "coverage": 0.22901838091513493
+          },
+          "known_positive": {
+            "total": 5241,
+            "covered": 1496,
+            "missing": 3745,
+            "coverage": 0.28544170959740506
+          },
+          "known_negative": {
+            "total": 29358,
+            "covered": 5656,
+            "missing": 23702,
+            "coverage": 0.19265617548879352
+          },
+          "unknown": {
+            "total": 16541,
+            "covered": 4560,
+            "missing": 11981,
+            "coverage": 0.2756786167704492
+          },
+          "solid": {
+            "total": 60,
+            "covered": 0,
+            "missing": 60,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 51200,
+        "direct_prediction_count": 16058,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 3745
+      }
+    },
+    {
+      "name": "cylinder2d",
+      "source_id": 1,
+      "split": "train",
+      "frame": 724,
+      "selected_patch_count": 64,
+      "available_patch_count": 156,
+      "model_view_seed": 1009288028,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 327,
+      "failed_rate": 0.01995849609375,
+      "elapsed_seconds": 3.26429233700037,
+      "metrics": {
+        "tp": 1493,
+        "fp": 19,
+        "fn": 26,
+        "tn": 5446,
+        "observed_known": 6984,
+        "precision": 0.9874338624338624,
+        "recall": 0.9828834759710335,
+        "f1": 0.9851534147146156,
+        "iou": 0.97074122236671,
+        "auprc": 0.9987575610129517
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 51140,
+            "covered": 11711,
+            "missing": 39429,
+            "coverage": 0.22899882675009778
+          },
+          "known_positive": {
+            "total": 5469,
+            "covered": 1519,
+            "missing": 3950,
+            "coverage": 0.2777473029804352
+          },
+          "known_negative": {
+            "total": 28511,
+            "covered": 5465,
+            "missing": 23046,
+            "coverage": 0.19168040405457543
+          },
+          "unknown": {
+            "total": 17160,
+            "covered": 4727,
+            "missing": 12433,
+            "coverage": 0.27546620046620046
+          },
+          "solid": {
+            "total": 60,
+            "covered": 0,
+            "missing": 60,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 51200,
+        "direct_prediction_count": 16057,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 3950
+      }
+    },
+    {
+      "name": "cylinder2d",
+      "source_id": 1,
+      "split": "calibration",
+      "frame": 750,
+      "selected_patch_count": 64,
+      "available_patch_count": 156,
+      "model_view_seed": 1714608185,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 326,
+      "failed_rate": 0.0198974609375,
+      "elapsed_seconds": 3.315350873977877,
+      "metrics": {
+        "tp": 1643,
+        "fp": 36,
+        "fn": 46,
+        "tn": 5293,
+        "observed_known": 7018,
+        "precision": 0.9785586658725431,
+        "recall": 0.9727649496743636,
+        "f1": 0.9756532066508313,
+        "iou": 0.952463768115942,
+        "auprc": 0.9952895031735467
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 51140,
+            "covered": 11713,
+            "missing": 39427,
+            "coverage": 0.2290379350801721
+          },
+          "known_positive": {
+            "total": 5705,
+            "covered": 1689,
+            "missing": 4016,
+            "coverage": 0.2960560911481157
+          },
+          "known_negative": {
+            "total": 27497,
+            "covered": 5329,
+            "missing": 22168,
+            "coverage": 0.19380296032294433
+          },
+          "unknown": {
+            "total": 17938,
+            "covered": 4695,
+            "missing": 13243,
+            "coverage": 0.2617348645333928
+          },
+          "solid": {
+            "total": 60,
+            "covered": 0,
+            "missing": 60,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 51200,
+        "direct_prediction_count": 16058,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 4016
+      }
+    },
+    {
+      "name": "cylinder2d",
+      "source_id": 1,
+      "split": "calibration",
+      "frame": 825,
+      "selected_patch_count": 64,
+      "available_patch_count": 156,
+      "model_view_seed": 3196244690,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 326,
+      "failed_rate": 0.0198974609375,
+      "elapsed_seconds": 3.302950917975977,
+      "metrics": {
+        "tp": 1787,
+        "fp": 20,
+        "fn": 75,
+        "tn": 4538,
+        "observed_known": 6420,
+        "precision": 0.9889319313779745,
+        "recall": 0.9597207303974221,
+        "f1": 0.9741073862087762,
+        "iou": 0.9495217853347503,
+        "auprc": 0.9986092763782036
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 51140,
+            "covered": 11713,
+            "missing": 39427,
+            "coverage": 0.2290379350801721
+          },
+          "known_positive": {
+            "total": 6484,
+            "covered": 1862,
+            "missing": 4622,
+            "coverage": 0.28716841455891423
+          },
+          "known_negative": {
+            "total": 24510,
+            "covered": 4558,
+            "missing": 19952,
+            "coverage": 0.18596491228070175
+          },
+          "unknown": {
+            "total": 20146,
+            "covered": 5293,
+            "missing": 14853,
+            "coverage": 0.26273205599126376
+          },
+          "solid": {
+            "total": 60,
+            "covered": 0,
+            "missing": 60,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 51200,
+        "direct_prediction_count": 16058,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 4622
+      }
+    },
+    {
+      "name": "cylinder2d",
+      "source_id": 1,
+      "split": "calibration",
+      "frame": 874,
+      "selected_patch_count": 64,
+      "available_patch_count": 156,
+      "model_view_seed": 2408868271,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 322,
+      "failed_rate": 0.0196533203125,
+      "elapsed_seconds": 3.2808866349514574,
+      "metrics": {
+        "tp": 2009,
+        "fp": 22,
+        "fn": 90,
+        "tn": 4222,
+        "observed_known": 6343,
+        "precision": 0.9891678975873953,
+        "recall": 0.957122439256789,
+        "f1": 0.9728813559322034,
+        "iou": 0.9471947194719472,
+        "auprc": 0.9979599424067649
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 51140,
+            "covered": 11715,
+            "missing": 39425,
+            "coverage": 0.22907704341024637
+          },
+          "known_positive": {
+            "total": 6997,
+            "covered": 2099,
+            "missing": 4898,
+            "coverage": 0.2999857081606403
+          },
+          "known_negative": {
+            "total": 23300,
+            "covered": 4244,
+            "missing": 19056,
+            "coverage": 0.18214592274678112
+          },
+          "unknown": {
+            "total": 20843,
+            "covered": 5372,
+            "missing": 15471,
+            "coverage": 0.25773641030561817
+          },
+          "solid": {
+            "total": 60,
+            "covered": 0,
+            "missing": 60,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 51200,
+        "direct_prediction_count": 16062,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 4898
+      }
+    },
+    {
+      "name": "doublegyre2d",
+      "source_id": 2,
+      "split": "train",
+      "frame": 32,
+      "selected_patch_count": 64,
+      "available_patch_count": 105,
+      "model_view_seed": 1419094014,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 0,
+      "failed_rate": 0.0,
+      "elapsed_seconds": 3.1052777719451115,
+      "metrics": {
+        "tp": 424,
+        "fp": 2,
+        "fn": 0,
+        "tn": 8782,
+        "observed_known": 9208,
+        "precision": 0.9953051643192489,
+        "recall": 1.0,
+        "f1": 0.9976470588235294,
+        "iou": 0.9953051643192489,
+        "auprc": 0.9999833647965877
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 32764,
+            "covered": 11460,
+            "missing": 21304,
+            "coverage": 0.34977414235136123
+          },
+          "known_positive": {
+            "total": 1122,
+            "covered": 424,
+            "missing": 698,
+            "coverage": 0.3778966131907308
+          },
+          "known_negative": {
+            "total": 26364,
+            "covered": 8784,
+            "missing": 17580,
+            "coverage": 0.3331816112881202
+          },
+          "unknown": {
+            "total": 5278,
+            "covered": 2252,
+            "missing": 3026,
+            "coverage": 0.42667677150435773
+          },
+          "solid": {
+            "total": 4,
+            "covered": 0,
+            "missing": 4,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 32768,
+        "direct_prediction_count": 16384,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 698
+      }
+    },
+    {
+      "name": "doublegyre2d",
+      "source_id": 2,
+      "split": "train",
+      "frame": 128,
+      "selected_patch_count": 64,
+      "available_patch_count": 105,
+      "model_view_seed": 2500358776,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 0,
+      "failed_rate": 0.0,
+      "elapsed_seconds": 3.0883928140392527,
+      "metrics": {
+        "tp": 976,
+        "fp": 0,
+        "fn": 4,
+        "tn": 8613,
+        "observed_known": 9593,
+        "precision": 1.0,
+        "recall": 0.9959183673469387,
+        "f1": 0.9979550102249489,
+        "iou": 0.9959183673469387,
+        "auprc": 1.0
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 32764,
+            "covered": 11460,
+            "missing": 21304,
+            "coverage": 0.34977414235136123
+          },
+          "known_positive": {
+            "total": 2364,
+            "covered": 980,
+            "missing": 1384,
+            "coverage": 0.41455160744500846
+          },
+          "known_negative": {
+            "total": 25982,
+            "covered": 8613,
+            "missing": 17369,
+            "coverage": 0.3314987298899238
+          },
+          "unknown": {
+            "total": 4418,
+            "covered": 1867,
+            "missing": 2551,
+            "coverage": 0.4225894069714803
+          },
+          "solid": {
+            "total": 4,
+            "covered": 0,
+            "missing": 4,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 32768,
+        "direct_prediction_count": 16384,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 1384
+      }
+    },
+    {
+      "name": "doublegyre2d",
+      "source_id": 2,
+      "split": "train",
+      "frame": 224,
+      "selected_patch_count": 64,
+      "available_patch_count": 105,
+      "model_view_seed": 3864878169,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 0,
+      "failed_rate": 0.0,
+      "elapsed_seconds": 3.1529636090854183,
+      "metrics": {
+        "tp": 422,
+        "fp": 0,
+        "fn": 4,
+        "tn": 8788,
+        "observed_known": 9214,
+        "precision": 1.0,
+        "recall": 0.9906103286384976,
+        "f1": 0.9952830188679245,
+        "iou": 0.9906103286384976,
+        "auprc": 0.9999671298483608
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 32764,
+            "covered": 11460,
+            "missing": 21304,
+            "coverage": 0.34977414235136123
+          },
+          "known_positive": {
+            "total": 1110,
+            "covered": 426,
+            "missing": 684,
+            "coverage": 0.3837837837837838
+          },
+          "known_negative": {
+            "total": 26366,
+            "covered": 8788,
+            "missing": 17578,
+            "coverage": 0.33330804824395055
+          },
+          "unknown": {
+            "total": 5288,
+            "covered": 2246,
+            "missing": 3042,
+            "coverage": 0.42473524962178516
+          },
+          "solid": {
+            "total": 4,
+            "covered": 0,
+            "missing": 4,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 32768,
+        "direct_prediction_count": 16384,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 684
+      }
+    },
+    {
+      "name": "doublegyre2d",
+      "source_id": 2,
+      "split": "calibration",
+      "frame": 256,
+      "selected_patch_count": 64,
+      "available_patch_count": 105,
+      "model_view_seed": 322879621,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 0,
+      "failed_rate": 0.0,
+      "elapsed_seconds": 3.1548721350263804,
+      "metrics": {
+        "tp": 122,
+        "fp": 1,
+        "fn": 1,
+        "tn": 8920,
+        "observed_known": 9044,
+        "precision": 0.991869918699187,
+        "recall": 0.991869918699187,
+        "f1": 0.991869918699187,
+        "iou": 0.9838709677419355,
+        "auprc": 0.9998699186991871
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 32764,
+            "covered": 11460,
+            "missing": 21304,
+            "coverage": 0.34977414235136123
+          },
+          "known_positive": {
+            "total": 294,
+            "covered": 123,
+            "missing": 171,
+            "coverage": 0.41836734693877553
+          },
+          "known_negative": {
+            "total": 26404,
+            "covered": 8921,
+            "missing": 17483,
+            "coverage": 0.3378654749280412
+          },
+          "unknown": {
+            "total": 6066,
+            "covered": 2416,
+            "missing": 3650,
+            "coverage": 0.39828552588196503
+          },
+          "solid": {
+            "total": 4,
+            "covered": 0,
+            "missing": 4,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 32768,
+        "direct_prediction_count": 16384,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 171
+      }
+    },
+    {
+      "name": "doublegyre2d",
+      "source_id": 2,
+      "split": "calibration",
+      "frame": 270,
+      "selected_patch_count": 64,
+      "available_patch_count": 105,
+      "model_view_seed": 855042576,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 0,
+      "failed_rate": 0.0,
+      "elapsed_seconds": 3.1380528119625524,
+      "metrics": {
+        "tp": 233,
+        "fp": 2,
+        "fn": 2,
+        "tn": 8850,
+        "observed_known": 9087,
+        "precision": 0.9914893617021276,
+        "recall": 0.9914893617021276,
+        "f1": 0.9914893617021276,
+        "iou": 0.9831223628691983,
+        "auprc": 0.9996278239257259
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 32764,
+            "covered": 11460,
+            "missing": 21304,
+            "coverage": 0.34977414235136123
+          },
+          "known_positive": {
+            "total": 604,
+            "covered": 235,
+            "missing": 369,
+            "coverage": 0.3890728476821192
+          },
+          "known_negative": {
+            "total": 26380,
+            "covered": 8852,
+            "missing": 17528,
+            "coverage": 0.335557240333586
+          },
+          "unknown": {
+            "total": 5780,
+            "covered": 2373,
+            "missing": 3407,
+            "coverage": 0.4105536332179931
+          },
+          "solid": {
+            "total": 4,
+            "covered": 0,
+            "missing": 4,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 32768,
+        "direct_prediction_count": 16384,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 369
+      }
+    },
+    {
+      "name": "doublegyre2d",
+      "source_id": 2,
+      "split": "calibration",
+      "frame": 282,
+      "selected_patch_count": 64,
+      "available_patch_count": 105,
+      "model_view_seed": 3266593515,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 0,
+      "failed_rate": 0.0,
+      "elapsed_seconds": 3.1084872409701347,
+      "metrics": {
+        "tp": 371,
+        "fp": 0,
+        "fn": 4,
+        "tn": 8826,
+        "observed_known": 9201,
+        "precision": 1.0,
+        "recall": 0.9893333333333333,
+        "f1": 0.9946380697050938,
+        "iou": 0.9893333333333333,
+        "auprc": 0.999858585858586
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 32764,
+            "covered": 11460,
+            "missing": 21304,
+            "coverage": 0.34977414235136123
+          },
+          "known_positive": {
+            "total": 968,
+            "covered": 375,
+            "missing": 593,
+            "coverage": 0.38739669421487605
+          },
+          "known_negative": {
+            "total": 26390,
+            "covered": 8826,
+            "missing": 17564,
+            "coverage": 0.33444486547934826
+          },
+          "unknown": {
+            "total": 5406,
+            "covered": 2259,
+            "missing": 3147,
+            "coverage": 0.4178690344062153
+          },
+          "solid": {
+            "total": 4,
+            "covered": 0,
+            "missing": 4,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 32768,
+        "direct_prediction_count": 16384,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 593
+      }
+    },
+    {
+      "name": "fourcenters2d",
+      "source_id": 3,
+      "split": "train",
+      "frame": 16,
+      "selected_patch_count": 49,
+      "available_patch_count": 49,
+      "model_view_seed": 2114914582,
+      "attempted_pathlines": 12544,
+      "failed_pathlines": 584,
+      "failed_rate": 0.046556122448979595,
+      "elapsed_seconds": 2.400810169056058,
+      "metrics": {
+        "tp": 491,
+        "fp": 3,
+        "fn": 1,
+        "tn": 5643,
+        "observed_known": 6138,
+        "precision": 0.9939271255060729,
+        "recall": 0.9979674796747967,
+        "f1": 0.9959432048681541,
+        "iou": 0.9919191919191919,
+        "auprc": 0.999987681694999
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 16384,
+            "covered": 7650,
+            "missing": 8734,
+            "coverage": 0.4669189453125
+          },
+          "known_positive": {
+            "total": 816,
+            "covered": 492,
+            "missing": 324,
+            "coverage": 0.6029411764705882
+          },
+          "known_negative": {
+            "total": 13104,
+            "covered": 5646,
+            "missing": 7458,
+            "coverage": 0.4308608058608059
+          },
+          "unknown": {
+            "total": 2464,
+            "covered": 1512,
+            "missing": 952,
+            "coverage": 0.6136363636363636
+          },
+          "solid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 16384,
+        "direct_prediction_count": 11960,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 324
+      }
+    },
+    {
+      "name": "fourcenters2d",
+      "source_id": 3,
+      "split": "train",
+      "frame": 112,
+      "selected_patch_count": 49,
+      "available_patch_count": 49,
+      "model_view_seed": 1717814518,
+      "attempted_pathlines": 12544,
+      "failed_pathlines": 582,
+      "failed_rate": 0.046396683673469385,
+      "elapsed_seconds": 2.3947145889978856,
+      "metrics": {
+        "tp": 492,
+        "fp": 0,
+        "fn": 0,
+        "tn": 5652,
+        "observed_known": 6144,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "iou": 1.0,
+        "auprc": 1.0000000000000002
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 16384,
+            "covered": 7648,
+            "missing": 8736,
+            "coverage": 0.466796875
+          },
+          "known_positive": {
+            "total": 812,
+            "covered": 492,
+            "missing": 320,
+            "coverage": 0.6059113300492611
+          },
+          "known_negative": {
+            "total": 13124,
+            "covered": 5652,
+            "missing": 7472,
+            "coverage": 0.43066138372447427
+          },
+          "unknown": {
+            "total": 2448,
+            "covered": 1504,
+            "missing": 944,
+            "coverage": 0.6143790849673203
+          },
+          "solid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 16384,
+        "direct_prediction_count": 11962,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 320
+      }
+    },
+    {
+      "name": "fourcenters2d",
+      "source_id": 3,
+      "split": "train",
+      "frame": 220,
+      "selected_patch_count": 49,
+      "available_patch_count": 49,
+      "model_view_seed": 2451579842,
+      "attempted_pathlines": 12544,
+      "failed_pathlines": 586,
+      "failed_rate": 0.0467155612244898,
+      "elapsed_seconds": 2.399987919954583,
+      "metrics": {
+        "tp": 519,
+        "fp": 0,
+        "fn": 1,
+        "tn": 5678,
+        "observed_known": 6198,
+        "precision": 1.0,
+        "recall": 0.9980769230769231,
+        "f1": 0.9990375360923965,
+        "iou": 0.9980769230769231,
+        "auprc": 0.9999672822451651
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 16384,
+            "covered": 7642,
+            "missing": 8742,
+            "coverage": 0.4664306640625
+          },
+          "known_positive": {
+            "total": 824,
+            "covered": 520,
+            "missing": 304,
+            "coverage": 0.6310679611650486
+          },
+          "known_negative": {
+            "total": 13116,
+            "covered": 5678,
+            "missing": 7438,
+            "coverage": 0.43290637389448
+          },
+          "unknown": {
+            "total": 2444,
+            "covered": 1444,
+            "missing": 1000,
+            "coverage": 0.5908346972176759
+          },
+          "solid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 16384,
+        "direct_prediction_count": 11958,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 304
+      }
+    },
+    {
+      "name": "fourcenters2d",
+      "source_id": 3,
+      "split": "calibration",
+      "frame": 256,
+      "selected_patch_count": 49,
+      "available_patch_count": 49,
+      "model_view_seed": 907529057,
+      "attempted_pathlines": 12544,
+      "failed_pathlines": 582,
+      "failed_rate": 0.046396683673469385,
+      "elapsed_seconds": 2.409123191027902,
+      "metrics": {
+        "tp": 487,
+        "fp": 0,
+        "fn": 5,
+        "tn": 5652,
+        "observed_known": 6144,
+        "precision": 1.0,
+        "recall": 0.9898373983739838,
+        "f1": 0.9948927477017364,
+        "iou": 0.9898373983739838,
+        "auprc": 0.9999876400339003
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 16384,
+            "covered": 7652,
+            "missing": 8732,
+            "coverage": 0.467041015625
+          },
+          "known_positive": {
+            "total": 828,
+            "covered": 492,
+            "missing": 336,
+            "coverage": 0.5942028985507246
+          },
+          "known_negative": {
+            "total": 13092,
+            "covered": 5652,
+            "missing": 7440,
+            "coverage": 0.4317140238313474
+          },
+          "unknown": {
+            "total": 2464,
+            "covered": 1508,
+            "missing": 956,
+            "coverage": 0.612012987012987
+          },
+          "solid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 16384,
+        "direct_prediction_count": 11962,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 336
+      }
+    },
+    {
+      "name": "fourcenters2d",
+      "source_id": 3,
+      "split": "calibration",
+      "frame": 270,
+      "selected_patch_count": 49,
+      "available_patch_count": 49,
+      "model_view_seed": 2631930802,
+      "attempted_pathlines": 12544,
+      "failed_pathlines": 586,
+      "failed_rate": 0.0467155612244898,
+      "elapsed_seconds": 2.406880037044175,
+      "metrics": {
+        "tp": 494,
+        "fp": 2,
+        "fn": 2,
+        "tn": 5654,
+        "observed_known": 6152,
+        "precision": 0.9959677419354839,
+        "recall": 0.9959677419354839,
+        "f1": 0.9959677419354839,
+        "iou": 0.9919678714859438,
+        "auprc": 0.9999756356801521
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 16384,
+            "covered": 7648,
+            "missing": 8736,
+            "coverage": 0.466796875
+          },
+          "known_positive": {
+            "total": 816,
+            "covered": 496,
+            "missing": 320,
+            "coverage": 0.6078431372549019
+          },
+          "known_negative": {
+            "total": 13132,
+            "covered": 5656,
+            "missing": 7476,
+            "coverage": 0.43070362473347545
+          },
+          "unknown": {
+            "total": 2436,
+            "covered": 1496,
+            "missing": 940,
+            "coverage": 0.6141215106732348
+          },
+          "solid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 16384,
+        "direct_prediction_count": 11958,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 320
+      }
+    },
+    {
+      "name": "fourcenters2d",
+      "source_id": 3,
+      "split": "calibration",
+      "frame": 282,
+      "selected_patch_count": 49,
+      "available_patch_count": 49,
+      "model_view_seed": 2641960134,
+      "attempted_pathlines": 12544,
+      "failed_pathlines": 578,
+      "failed_rate": 0.04607780612244898,
+      "elapsed_seconds": 2.398543589981273,
+      "metrics": {
+        "tp": 511,
+        "fp": 0,
+        "fn": 1,
+        "tn": 5674,
+        "observed_known": 6186,
+        "precision": 1.0,
+        "recall": 0.998046875,
+        "f1": 0.9990224828934506,
+        "iou": 0.998046875,
+        "auprc": 0.9999961927387915
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 16384,
+            "covered": 7654,
+            "missing": 8730,
+            "coverage": 0.4671630859375
+          },
+          "known_positive": {
+            "total": 828,
+            "covered": 512,
+            "missing": 316,
+            "coverage": 0.6183574879227053
+          },
+          "known_negative": {
+            "total": 13096,
+            "covered": 5674,
+            "missing": 7422,
+            "coverage": 0.4332620647525962
+          },
+          "unknown": {
+            "total": 2460,
+            "covered": 1468,
+            "missing": 992,
+            "coverage": 0.5967479674796748
+          },
+          "solid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 16384,
+        "direct_prediction_count": 11966,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 316
+      }
+    },
+    {
+      "name": "jungtelziemniak2d",
+      "source_id": 4,
+      "split": "train",
+      "frame": 24,
+      "selected_patch_count": 64,
+      "available_patch_count": 297,
+      "model_view_seed": 1370010348,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 3885,
+      "failed_rate": 0.23712158203125,
+      "elapsed_seconds": 3.912744877045043,
+      "metrics": {
+        "tp": 731,
+        "fp": 0,
+        "fn": 11,
+        "tn": 6157,
+        "observed_known": 6899,
+        "precision": 1.0,
+        "recall": 0.9851752021563343,
+        "f1": 0.9925322471147319,
+        "iou": 0.9851752021563343,
+        "auprc": 0.9999999999999999
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 89988,
+            "covered": 8700,
+            "missing": 81288,
+            "coverage": 0.09667955727430325
+          },
+          "known_positive": {
+            "total": 4711,
+            "covered": 742,
+            "missing": 3969,
+            "coverage": 0.1575037147102526
+          },
+          "known_negative": {
+            "total": 72329,
+            "covered": 6157,
+            "missing": 66172,
+            "coverage": 0.0851249153175075
+          },
+          "unknown": {
+            "total": 12948,
+            "covered": 1801,
+            "missing": 11147,
+            "coverage": 0.1390948409020698
+          },
+          "solid": {
+            "total": 12,
+            "covered": 0,
+            "missing": 12,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 90000,
+        "direct_prediction_count": 12499,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 3969
+      }
+    },
+    {
+      "name": "jungtelziemniak2d",
+      "source_id": 4,
+      "split": "train",
+      "frame": 124,
+      "selected_patch_count": 64,
+      "available_patch_count": 297,
+      "model_view_seed": 501281851,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 3834,
+      "failed_rate": 0.2340087890625,
+      "elapsed_seconds": 3.9007870689965785,
+      "metrics": {
+        "tp": 666,
+        "fp": 0,
+        "fn": 0,
+        "tn": 6269,
+        "observed_known": 6935,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "iou": 1.0,
+        "auprc": 1.0000000000000002
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 89988,
+            "covered": 8729,
+            "missing": 81259,
+            "coverage": 0.09700182246521759
+          },
+          "known_positive": {
+            "total": 4504,
+            "covered": 666,
+            "missing": 3838,
+            "coverage": 0.14786856127886322
+          },
+          "known_negative": {
+            "total": 71509,
+            "covered": 6269,
+            "missing": 65240,
+            "coverage": 0.08766728663524871
+          },
+          "unknown": {
+            "total": 13975,
+            "covered": 1794,
+            "missing": 12181,
+            "coverage": 0.1283720930232558
+          },
+          "solid": {
+            "total": 12,
+            "covered": 0,
+            "missing": 12,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 90000,
+        "direct_prediction_count": 12550,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 3838
+      }
+    },
+    {
+      "name": "jungtelziemniak2d",
+      "source_id": 4,
+      "split": "train",
+      "frame": 224,
+      "selected_patch_count": 64,
+      "available_patch_count": 297,
+      "model_view_seed": 2047672756,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 3976,
+      "failed_rate": 0.24267578125,
+      "elapsed_seconds": 3.929556983988732,
+      "metrics": {
+        "tp": 769,
+        "fp": 0,
+        "fn": 2,
+        "tn": 6281,
+        "observed_known": 7052,
+        "precision": 1.0,
+        "recall": 0.9974059662775616,
+        "f1": 0.9987012987012988,
+        "iou": 0.9974059662775616,
+        "auprc": 1.0000000000000002
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 89988,
+            "covered": 8636,
+            "missing": 81352,
+            "coverage": 0.09596835133573366
+          },
+          "known_positive": {
+            "total": 5043,
+            "covered": 771,
+            "missing": 4272,
+            "coverage": 0.15288518738845924
+          },
+          "known_negative": {
+            "total": 73301,
+            "covered": 6281,
+            "missing": 67020,
+            "coverage": 0.08568778052141171
+          },
+          "unknown": {
+            "total": 11644,
+            "covered": 1584,
+            "missing": 10060,
+            "coverage": 0.13603572655444865
+          },
+          "solid": {
+            "total": 12,
+            "covered": 0,
+            "missing": 12,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 90000,
+        "direct_prediction_count": 12408,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 4272
+      }
+    },
+    {
+      "name": "jungtelziemniak2d",
+      "source_id": 4,
+      "split": "calibration",
+      "frame": 250,
+      "selected_patch_count": 64,
+      "available_patch_count": 297,
+      "model_view_seed": 4081635507,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 3831,
+      "failed_rate": 0.23382568359375,
+      "elapsed_seconds": 3.949527157936245,
+      "metrics": {
+        "tp": 665,
+        "fp": 0,
+        "fn": 3,
+        "tn": 6262,
+        "observed_known": 6930,
+        "precision": 1.0,
+        "recall": 0.9955089820359282,
+        "f1": 0.9977494373593399,
+        "iou": 0.9955089820359282,
+        "auprc": 0.9999977623228878
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 89988,
+            "covered": 8730,
+            "missing": 81258,
+            "coverage": 0.09701293505800773
+          },
+          "known_positive": {
+            "total": 4546,
+            "covered": 668,
+            "missing": 3878,
+            "coverage": 0.1469423669159701
+          },
+          "known_negative": {
+            "total": 71389,
+            "covered": 6262,
+            "missing": 65127,
+            "coverage": 0.08771659499362647
+          },
+          "unknown": {
+            "total": 14053,
+            "covered": 1800,
+            "missing": 12253,
+            "coverage": 0.12808652956664057
+          },
+          "solid": {
+            "total": 12,
+            "covered": 0,
+            "missing": 12,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 90000,
+        "direct_prediction_count": 12553,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 3878
+      }
+    },
+    {
+      "name": "jungtelziemniak2d",
+      "source_id": 4,
+      "split": "calibration",
+      "frame": 270,
+      "selected_patch_count": 64,
+      "available_patch_count": 297,
+      "model_view_seed": 1382892669,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 3850,
+      "failed_rate": 0.2349853515625,
+      "elapsed_seconds": 3.9370579429669306,
+      "metrics": {
+        "tp": 694,
+        "fp": 2,
+        "fn": 4,
+        "tn": 6080,
+        "observed_known": 6780,
+        "precision": 0.9971264367816092,
+        "recall": 0.994269340974212,
+        "f1": 0.9956958393113343,
+        "iou": 0.9914285714285714,
+        "auprc": 0.9995664764389297
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 89988,
+            "covered": 8721,
+            "missing": 81267,
+            "coverage": 0.09691292172289638
+          },
+          "known_positive": {
+            "total": 4370,
+            "covered": 698,
+            "missing": 3672,
+            "coverage": 0.1597254004576659
+          },
+          "known_negative": {
+            "total": 71906,
+            "covered": 6082,
+            "missing": 65824,
+            "coverage": 0.0845826495702723
+          },
+          "unknown": {
+            "total": 13712,
+            "covered": 1941,
+            "missing": 11771,
+            "coverage": 0.1415548424737456
+          },
+          "solid": {
+            "total": 12,
+            "covered": 0,
+            "missing": 12,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 90000,
+        "direct_prediction_count": 12534,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 3672
+      }
+    },
+    {
+      "name": "jungtelziemniak2d",
+      "source_id": 4,
+      "split": "calibration",
+      "frame": 276,
+      "selected_patch_count": 64,
+      "available_patch_count": 297,
+      "model_view_seed": 2443530353,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 3899,
+      "failed_rate": 0.23797607421875,
+      "elapsed_seconds": 3.9434722180012614,
+      "metrics": {
+        "tp": 739,
+        "fp": 0,
+        "fn": 1,
+        "tn": 6165,
+        "observed_known": 6905,
+        "precision": 1.0,
+        "recall": 0.9986486486486487,
+        "f1": 0.9993238674780257,
+        "iou": 0.9986486486486487,
+        "auprc": 1.0
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 89988,
+            "covered": 8691,
+            "missing": 81297,
+            "coverage": 0.0965795439391919
+          },
+          "known_positive": {
+            "total": 4832,
+            "covered": 740,
+            "missing": 4092,
+            "coverage": 0.15314569536423842
+          },
+          "known_negative": {
+            "total": 72508,
+            "covered": 6165,
+            "missing": 66343,
+            "coverage": 0.08502510067854581
+          },
+          "unknown": {
+            "total": 12648,
+            "covered": 1786,
+            "missing": 10862,
+            "coverage": 0.14120809614168248
+          },
+          "solid": {
+            "total": 12,
+            "covered": 0,
+            "missing": 12,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 90000,
+        "direct_prediction_count": 12485,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 4092
+      }
+    },
+    {
+      "name": "pipedcylinder2d",
+      "source_id": 5,
+      "split": "train",
+      "frame": 376,
+      "selected_patch_count": 64,
+      "available_patch_count": 128,
+      "model_view_seed": 2195008109,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 549,
+      "failed_rate": 0.03350830078125,
+      "elapsed_seconds": 4.500917344004847,
+      "metrics": {
+        "tp": 871,
+        "fp": 155,
+        "fn": 115,
+        "tn": 8553,
+        "observed_known": 9694,
+        "precision": 0.8489278752436648,
+        "recall": 0.8833671399594321,
+        "f1": 0.8658051689860835,
+        "iou": 0.7633654688869412,
+        "auprc": 0.9515117367321717
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 39287,
+            "covered": 11405,
+            "missing": 27882,
+            "coverage": 0.29029959019523
+          },
+          "known_positive": {
+            "total": 2776,
+            "covered": 986,
+            "missing": 1790,
+            "coverage": 0.35518731988472624
+          },
+          "known_negative": {
+            "total": 30784,
+            "covered": 8708,
+            "missing": 22076,
+            "coverage": 0.2828742203742204
+          },
+          "unknown": {
+            "total": 5727,
+            "covered": 1711,
+            "missing": 4016,
+            "coverage": 0.29876025842500437
+          },
+          "solid": {
+            "total": 28213,
+            "covered": 0,
+            "missing": 28213,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 67500,
+        "direct_prediction_count": 15835,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 1790
+      }
+    },
+    {
+      "name": "pipedcylinder2d",
+      "source_id": 5,
+      "split": "train",
+      "frame": 436,
+      "selected_patch_count": 64,
+      "available_patch_count": 128,
+      "model_view_seed": 401580600,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 478,
+      "failed_rate": 0.0291748046875,
+      "elapsed_seconds": 4.302214254043065,
+      "metrics": {
+        "tp": 786,
+        "fp": 144,
+        "fn": 48,
+        "tn": 8344,
+        "observed_known": 9322,
+        "precision": 0.8451612903225807,
+        "recall": 0.9424460431654677,
+        "f1": 0.891156462585034,
+        "iou": 0.803680981595092,
+        "auprc": 0.9633398786827376
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 39287,
+            "covered": 11440,
+            "missing": 27847,
+            "coverage": 0.2911904701300685
+          },
+          "known_positive": {
+            "total": 2338,
+            "covered": 834,
+            "missing": 1504,
+            "coverage": 0.3567151411462789
+          },
+          "known_negative": {
+            "total": 30162,
+            "covered": 8488,
+            "missing": 21674,
+            "coverage": 0.2814136993568066
+          },
+          "unknown": {
+            "total": 6787,
+            "covered": 2118,
+            "missing": 4669,
+            "coverage": 0.31206718726978044
+          },
+          "solid": {
+            "total": 28213,
+            "covered": 0,
+            "missing": 28213,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 67500,
+        "direct_prediction_count": 15906,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 1504
+      }
+    },
+    {
+      "name": "pipedcylinder2d",
+      "source_id": 5,
+      "split": "train",
+      "frame": 700,
+      "selected_patch_count": 64,
+      "available_patch_count": 128,
+      "model_view_seed": 1229118501,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 584,
+      "failed_rate": 0.03564453125,
+      "elapsed_seconds": 4.283423859975301,
+      "metrics": {
+        "tp": 550,
+        "fp": 147,
+        "fn": 52,
+        "tn": 7548,
+        "observed_known": 8297,
+        "precision": 0.7890961262553802,
+        "recall": 0.9136212624584718,
+        "f1": 0.8468052347959969,
+        "iou": 0.7343124165554072,
+        "auprc": 0.938521108981502
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 39287,
+            "covered": 11370,
+            "missing": 27917,
+            "coverage": 0.2894087102603915
+          },
+          "known_positive": {
+            "total": 1655,
+            "covered": 602,
+            "missing": 1053,
+            "coverage": 0.3637462235649547
+          },
+          "known_negative": {
+            "total": 27005,
+            "covered": 7695,
+            "missing": 19310,
+            "coverage": 0.2849472319940752
+          },
+          "unknown": {
+            "total": 10627,
+            "covered": 3073,
+            "missing": 7554,
+            "coverage": 0.2891690975816317
+          },
+          "solid": {
+            "total": 28213,
+            "covered": 0,
+            "missing": 28213,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 67500,
+        "direct_prediction_count": 15800,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 1053
+      }
+    },
+    {
+      "name": "pipedcylinder2d",
+      "source_id": 5,
+      "split": "calibration",
+      "frame": 750,
+      "selected_patch_count": 64,
+      "available_patch_count": 128,
+      "model_view_seed": 506296903,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 565,
+      "failed_rate": 0.03448486328125,
+      "elapsed_seconds": 4.298912611906417,
+      "metrics": {
+        "tp": 520,
+        "fp": 92,
+        "fn": 62,
+        "tn": 7708,
+        "observed_known": 8382,
+        "precision": 0.8496732026143791,
+        "recall": 0.8934707903780069,
+        "f1": 0.8710217755443886,
+        "iou": 0.771513353115727,
+        "auprc": 0.9535742576616413
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 39287,
+            "covered": 11390,
+            "missing": 27897,
+            "coverage": 0.2899177845088706
+          },
+          "known_positive": {
+            "total": 1614,
+            "covered": 582,
+            "missing": 1032,
+            "coverage": 0.36059479553903345
+          },
+          "known_negative": {
+            "total": 27062,
+            "covered": 7800,
+            "missing": 19262,
+            "coverage": 0.2882270342177223
+          },
+          "unknown": {
+            "total": 10611,
+            "covered": 3008,
+            "missing": 7603,
+            "coverage": 0.283479408161342
+          },
+          "solid": {
+            "total": 28213,
+            "covered": 0,
+            "missing": 28213,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 67500,
+        "direct_prediction_count": 15819,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 1032
+      }
+    },
+    {
+      "name": "pipedcylinder2d",
+      "source_id": 5,
+      "split": "calibration",
+      "frame": 825,
+      "selected_patch_count": 64,
+      "available_patch_count": 128,
+      "model_view_seed": 3906668767,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 498,
+      "failed_rate": 0.0303955078125,
+      "elapsed_seconds": 4.410788082983345,
+      "metrics": {
+        "tp": 631,
+        "fp": 147,
+        "fn": 44,
+        "tn": 7995,
+        "observed_known": 8817,
+        "precision": 0.8110539845758354,
+        "recall": 0.9348148148148148,
+        "f1": 0.868547832071576,
+        "iou": 0.767639902676399,
+        "auprc": 0.9578448861435647
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 39287,
+            "covered": 11469,
+            "missing": 27818,
+            "coverage": 0.2919286277903632
+          },
+          "known_positive": {
+            "total": 1849,
+            "covered": 675,
+            "missing": 1174,
+            "coverage": 0.3650621957815035
+          },
+          "known_negative": {
+            "total": 28203,
+            "covered": 8142,
+            "missing": 20061,
+            "coverage": 0.2886926922667801
+          },
+          "unknown": {
+            "total": 9235,
+            "covered": 2652,
+            "missing": 6583,
+            "coverage": 0.28716838115863563
+          },
+          "solid": {
+            "total": 28213,
+            "covered": 0,
+            "missing": 28213,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 67500,
+        "direct_prediction_count": 15886,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 1174
+      }
+    },
+    {
+      "name": "pipedcylinder2d",
+      "source_id": 5,
+      "split": "calibration",
+      "frame": 874,
+      "selected_patch_count": 64,
+      "available_patch_count": 128,
+      "model_view_seed": 1698773951,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 500,
+      "failed_rate": 0.030517578125,
+      "elapsed_seconds": 4.466020872001536,
+      "metrics": {
+        "tp": 642,
+        "fp": 155,
+        "fn": 54,
+        "tn": 8050,
+        "observed_known": 8901,
+        "precision": 0.8055207026348808,
+        "recall": 0.9224137931034483,
+        "f1": 0.8600133958472873,
+        "iou": 0.754406580493537,
+        "auprc": 0.9447734238320529
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 39287,
+            "covered": 11434,
+            "missing": 27853,
+            "coverage": 0.2910377478555247
+          },
+          "known_positive": {
+            "total": 2070,
+            "covered": 696,
+            "missing": 1374,
+            "coverage": 0.336231884057971
+          },
+          "known_negative": {
+            "total": 28625,
+            "covered": 8205,
+            "missing": 20420,
+            "coverage": 0.28663755458515283
+          },
+          "unknown": {
+            "total": 8592,
+            "covered": 2533,
+            "missing": 6059,
+            "coverage": 0.2948091247672253
+          },
+          "solid": {
+            "total": 28213,
+            "covered": 0,
+            "missing": 28213,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 67500,
+        "direct_prediction_count": 15884,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 1374
+      }
+    },
+    {
+      "name": "mfc_airfoil",
+      "source_id": 6,
+      "split": "train",
+      "frame": 0,
+      "selected_patch_count": 64,
+      "available_patch_count": 13536,
+      "model_view_seed": 1563021450,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 544,
+      "failed_rate": 0.033203125,
+      "elapsed_seconds": 6.85141395998653,
+      "metrics": {
+        "tp": 143,
+        "fp": 12,
+        "fn": 6,
+        "tn": 10806,
+        "observed_known": 10967,
+        "precision": 0.9225806451612903,
+        "recall": 0.959731543624161,
+        "f1": 0.9407894736842105,
+        "iou": 0.8881987577639752,
+        "auprc": 0.9870350520862657
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 3561380,
+            "covered": 11884,
+            "missing": 3549496,
+            "coverage": 0.003336908726392578
+          },
+          "known_positive": {
+            "total": 101721,
+            "covered": 149,
+            "missing": 101572,
+            "coverage": 0.001464790947788559
+          },
+          "known_negative": {
+            "total": 3288202,
+            "covered": 10818,
+            "missing": 3277384,
+            "coverage": 0.0032899438659790368
+          },
+          "unknown": {
+            "total": 171457,
+            "covered": 917,
+            "missing": 170540,
+            "coverage": 0.005348279743609185
+          },
+          "solid": {
+            "total": 2272,
+            "covered": 0,
+            "missing": 2272,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 348,
+            "covered": 0,
+            "missing": 348,
+            "coverage": 0.0
+          }
+        },
+        "whole_grid_count": 3564000,
+        "direct_prediction_count": 15840,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 101572
+      }
+    },
+    {
+      "name": "mfc_airfoil",
+      "source_id": 6,
+      "split": "train",
+      "frame": 188,
+      "selected_patch_count": 64,
+      "available_patch_count": 13536,
+      "model_view_seed": 1783764977,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 544,
+      "failed_rate": 0.033203125,
+      "elapsed_seconds": 7.128798655001447,
+      "metrics": {
+        "tp": 617,
+        "fp": 2,
+        "fn": 6,
+        "tn": 9384,
+        "observed_known": 10009,
+        "precision": 0.9967689822294022,
+        "recall": 0.9903691813804173,
+        "f1": 0.9935587761674718,
+        "iou": 0.9872,
+        "auprc": 0.9996637104148294
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 3561380,
+            "covered": 11884,
+            "missing": 3549496,
+            "coverage": 0.003336908726392578
+          },
+          "known_positive": {
+            "total": 184500,
+            "covered": 623,
+            "missing": 183877,
+            "coverage": 0.0033766937669376692
+          },
+          "known_negative": {
+            "total": 2833532,
+            "covered": 9386,
+            "missing": 2824146,
+            "coverage": 0.003312473619496798
+          },
+          "unknown": {
+            "total": 543348,
+            "covered": 1875,
+            "missing": 541473,
+            "coverage": 0.003450827094237947
+          },
+          "solid": {
+            "total": 2272,
+            "covered": 0,
+            "missing": 2272,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 348,
+            "covered": 0,
+            "missing": 348,
+            "coverage": 0.0
+          }
+        },
+        "whole_grid_count": 3564000,
+        "direct_prediction_count": 15840,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 183877
+      }
+    },
+    {
+      "name": "mfc_airfoil",
+      "source_id": 6,
+      "split": "train",
+      "frame": 376,
+      "selected_patch_count": 64,
+      "available_patch_count": 13536,
+      "model_view_seed": 769289025,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 544,
+      "failed_rate": 0.033203125,
+      "elapsed_seconds": 7.171778041054495,
+      "metrics": {
+        "tp": 788,
+        "fp": 17,
+        "fn": 4,
+        "tn": 8953,
+        "observed_known": 9762,
+        "precision": 0.9788819875776398,
+        "recall": 0.9949494949494949,
+        "f1": 0.986850344395742,
+        "iou": 0.9740420271940667,
+        "auprc": 0.9991050386310487
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 3561380,
+            "covered": 11884,
+            "missing": 3549496,
+            "coverage": 0.003336908726392578
+          },
+          "known_positive": {
+            "total": 212635,
+            "covered": 792,
+            "missing": 211843,
+            "coverage": 0.0037246925482634563
+          },
+          "known_negative": {
+            "total": 2695825,
+            "covered": 8970,
+            "missing": 2686855,
+            "coverage": 0.003327367317982436
+          },
+          "unknown": {
+            "total": 652920,
+            "covered": 2122,
+            "missing": 650798,
+            "coverage": 0.0032500153158120442
+          },
+          "solid": {
+            "total": 2272,
+            "covered": 0,
+            "missing": 2272,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 348,
+            "covered": 0,
+            "missing": 348,
+            "coverage": 0.0
+          }
+        },
+        "whole_grid_count": 3564000,
+        "direct_prediction_count": 15840,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 211843
+      }
+    },
+    {
+      "name": "mfc_airfoil",
+      "source_id": 6,
+      "split": "calibration",
+      "frame": 400,
+      "selected_patch_count": 64,
+      "available_patch_count": 13536,
+      "model_view_seed": 1738685554,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 544,
+      "failed_rate": 0.033203125,
+      "elapsed_seconds": 7.153783236979507,
+      "metrics": {
+        "tp": 805,
+        "fp": 34,
+        "fn": 0,
+        "tn": 8913,
+        "observed_known": 9752,
+        "precision": 0.9594755661501788,
+        "recall": 1.0,
+        "f1": 0.9793187347931873,
+        "iou": 0.9594755661501788,
+        "auprc": 0.9997623394087363
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 3561380,
+            "covered": 11884,
+            "missing": 3549496,
+            "coverage": 0.003336908726392578
+          },
+          "known_positive": {
+            "total": 214781,
+            "covered": 805,
+            "missing": 213976,
+            "coverage": 0.003748003780595118
+          },
+          "known_negative": {
+            "total": 2686849,
+            "covered": 8947,
+            "missing": 2677902,
+            "coverage": 0.0033299228948109848
+          },
+          "unknown": {
+            "total": 659750,
+            "covered": 2132,
+            "missing": 657618,
+            "coverage": 0.003231527093596059
+          },
+          "solid": {
+            "total": 2272,
+            "covered": 0,
+            "missing": 2272,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 348,
+            "covered": 0,
+            "missing": 348,
+            "coverage": 0.0
+          }
+        },
+        "whole_grid_count": 3564000,
+        "direct_prediction_count": 15840,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 213976
+      }
+    },
+    {
+      "name": "mfc_airfoil",
+      "source_id": 6,
+      "split": "calibration",
+      "frame": 440,
+      "selected_patch_count": 64,
+      "available_patch_count": 13536,
+      "model_view_seed": 4053288904,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 544,
+      "failed_rate": 0.033203125,
+      "elapsed_seconds": 7.229955469025299,
+      "metrics": {
+        "tp": 695,
+        "fp": 24,
+        "fn": 3,
+        "tn": 8896,
+        "observed_known": 9618,
+        "precision": 0.9666203059805285,
+        "recall": 0.995702005730659,
+        "f1": 0.9809456598447425,
+        "iou": 0.9626038781163435,
+        "auprc": 0.9985135238080269
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 3561380,
+            "covered": 11884,
+            "missing": 3549496,
+            "coverage": 0.003336908726392578
+          },
+          "known_positive": {
+            "total": 219384,
+            "covered": 698,
+            "missing": 218686,
+            "coverage": 0.0031816358531159975
+          },
+          "known_negative": {
+            "total": 2673716,
+            "covered": 8920,
+            "missing": 2664796,
+            "coverage": 0.003336180806039235
+          },
+          "unknown": {
+            "total": 668280,
+            "covered": 2266,
+            "missing": 666014,
+            "coverage": 0.003390794277847609
+          },
+          "solid": {
+            "total": 2272,
+            "covered": 0,
+            "missing": 2272,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 348,
+            "covered": 0,
+            "missing": 348,
+            "coverage": 0.0
+          }
+        },
+        "whole_grid_count": 3564000,
+        "direct_prediction_count": 15840,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 218686
+      }
+    },
+    {
+      "name": "mfc_airfoil",
+      "source_id": 6,
+      "split": "calibration",
+      "frame": 476,
+      "selected_patch_count": 64,
+      "available_patch_count": 13536,
+      "model_view_seed": 2320669193,
+      "attempted_pathlines": 16384,
+      "failed_pathlines": 544,
+      "failed_rate": 0.033203125,
+      "elapsed_seconds": 7.165856739971787,
+      "metrics": {
+        "tp": 699,
+        "fp": 20,
+        "fn": 1,
+        "tn": 8876,
+        "observed_known": 9596,
+        "precision": 0.972183588317107,
+        "recall": 0.9985714285714286,
+        "f1": 0.985200845665962,
+        "iou": 0.9708333333333333,
+        "auprc": 0.9991008717485663
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 3561380,
+            "covered": 11884,
+            "missing": 3549496,
+            "coverage": 0.003336908726392578
+          },
+          "known_positive": {
+            "total": 219359,
+            "covered": 700,
+            "missing": 218659,
+            "coverage": 0.0031911159332418545
+          },
+          "known_negative": {
+            "total": 2664096,
+            "covered": 8896,
+            "missing": 2655200,
+            "coverage": 0.0033392190071228666
+          },
+          "unknown": {
+            "total": 677925,
+            "covered": 2288,
+            "missing": 675637,
+            "coverage": 0.00337500460965446
+          },
+          "solid": {
+            "total": 2272,
+            "covered": 0,
+            "missing": 2272,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 348,
+            "covered": 0,
+            "missing": 348,
+            "coverage": 0.0
+          }
+        },
+        "whole_grid_count": 3564000,
+        "direct_prediction_count": 15840,
+        "missing_probability_semantics": "unobserved; not a negative prediction",
+        "positive_reference_omission_count": 218659
+      }
+    }
+  ],
+  "source_summaries": {
+    "boussinesq/train": {
+      "metrics": {
+        "tp": 2607,
+        "fp": 34,
+        "fn": 94,
+        "tn": 23770,
+        "observed_known": 26505,
+        "precision": 0.9871260886028019,
+        "recall": 0.9651980747871158,
+        "f1": 0.9760389367278173,
+        "iou": 0.9531992687385741,
+        "auprc": 0.9968060283488672
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 201774,
+            "covered": 34396,
+            "missing": 167378,
+            "coverage": 0.17046794928979947
+          },
+          "known_positive": {
+            "total": 13517,
+            "covered": 2701,
+            "missing": 10816,
+            "coverage": 0.19982244580898129
+          },
+          "known_negative": {
+            "total": 145984,
+            "covered": 23804,
+            "missing": 122180,
+            "coverage": 0.1630589653660675
+          },
+          "unknown": {
+            "total": 42273,
+            "covered": 7891,
+            "missing": 34382,
+            "coverage": 0.18666761289712108
+          },
+          "solid": {
+            "total": 726,
+            "covered": 0,
+            "missing": 726,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 202500,
+        "direct_prediction_count": 49103,
+        "positive_reference_omission_count": 10816
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 49152,
+      "failed_pathlines": 49,
+      "failed_rate": 0.0009969075520833333
+    },
+    "boussinesq/calibration": {
+      "metrics": {
+        "tp": 5176,
+        "fp": 70,
+        "fn": 776,
+        "tn": 16708,
+        "observed_known": 22730,
+        "precision": 0.9866565001906215,
+        "recall": 0.8696236559139785,
+        "f1": 0.924450794784783,
+        "iou": 0.859515111258718,
+        "auprc": 0.9917858283041062
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 201774,
+            "covered": 34369,
+            "missing": 167405,
+            "coverage": 0.17033413621180132
+          },
+          "known_positive": {
+            "total": 29442,
+            "covered": 5952,
+            "missing": 23490,
+            "coverage": 0.20216017933564295
+          },
+          "known_negative": {
+            "total": 107705,
+            "covered": 16778,
+            "missing": 90927,
+            "coverage": 0.15577735481175434
+          },
+          "unknown": {
+            "total": 64627,
+            "covered": 11639,
+            "missing": 52988,
+            "coverage": 0.1800950067309329
+          },
+          "solid": {
+            "total": 726,
+            "covered": 0,
+            "missing": 726,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 202500,
+        "direct_prediction_count": 49078,
+        "positive_reference_omission_count": 23490
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 49152,
+      "failed_pathlines": 74,
+      "failed_rate": 0.0015055338541666667
+    },
+    "cylinder2d/train": {
+      "metrics": {
+        "tp": 3633,
+        "fp": 29,
+        "fn": 89,
+        "tn": 20206,
+        "observed_known": 23957,
+        "precision": 0.9920808301474604,
+        "recall": 0.9760881246641591,
+        "f1": 0.9840195016251354,
+        "iou": 0.9685417222074113,
+        "auprc": 0.998387715712543
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 153420,
+            "covered": 35138,
+            "missing": 118282,
+            "coverage": 0.2290314170251597
+          },
+          "known_positive": {
+            "total": 13027,
+            "covered": 3722,
+            "missing": 9305,
+            "coverage": 0.2857142857142857
+          },
+          "known_negative": {
+            "total": 99945,
+            "covered": 20235,
+            "missing": 79710,
+            "coverage": 0.2024613537445595
+          },
+          "unknown": {
+            "total": 40448,
+            "covered": 11181,
+            "missing": 29267,
+            "coverage": 0.27642899525316456
+          },
+          "solid": {
+            "total": 180,
+            "covered": 0,
+            "missing": 180,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 153600,
+        "direct_prediction_count": 48173,
+        "positive_reference_omission_count": 9305
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 49152,
+      "failed_pathlines": 979,
+      "failed_rate": 0.019917805989583332
+    },
+    "cylinder2d/calibration": {
+      "metrics": {
+        "tp": 5439,
+        "fp": 78,
+        "fn": 211,
+        "tn": 14053,
+        "observed_known": 19781,
+        "precision": 0.9858618814573138,
+        "recall": 0.9626548672566372,
+        "f1": 0.9741201755171487,
+        "iou": 0.9495460893854749,
+        "auprc": 0.997175561979654
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 153420,
+            "covered": 35141,
+            "missing": 118279,
+            "coverage": 0.22905097119019685
+          },
+          "known_positive": {
+            "total": 19186,
+            "covered": 5650,
+            "missing": 13536,
+            "coverage": 0.2944855623892422
+          },
+          "known_negative": {
+            "total": 75307,
+            "covered": 14131,
+            "missing": 61176,
+            "coverage": 0.18764523882242024
+          },
+          "unknown": {
+            "total": 58927,
+            "covered": 15360,
+            "missing": 43567,
+            "coverage": 0.2606614964277835
+          },
+          "solid": {
+            "total": 180,
+            "covered": 0,
+            "missing": 180,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 153600,
+        "direct_prediction_count": 48178,
+        "positive_reference_omission_count": 13536
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 49152,
+      "failed_pathlines": 974,
+      "failed_rate": 0.019816080729166668
+    },
+    "doublegyre2d/train": {
+      "metrics": {
+        "tp": 1822,
+        "fp": 2,
+        "fn": 8,
+        "tn": 26183,
+        "observed_known": 28015,
+        "precision": 0.9989035087719298,
+        "recall": 0.9956284153005465,
+        "f1": 0.9972632731253421,
+        "iou": 0.9945414847161572,
+        "auprc": 0.9999799827788468
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 98292,
+            "covered": 34380,
+            "missing": 63912,
+            "coverage": 0.34977414235136123
+          },
+          "known_positive": {
+            "total": 4596,
+            "covered": 1830,
+            "missing": 2766,
+            "coverage": 0.3981723237597911
+          },
+          "known_negative": {
+            "total": 78712,
+            "covered": 26185,
+            "missing": 52527,
+            "coverage": 0.3326684622420978
+          },
+          "unknown": {
+            "total": 14984,
+            "covered": 6365,
+            "missing": 8619,
+            "coverage": 0.424786438868126
+          },
+          "solid": {
+            "total": 12,
+            "covered": 0,
+            "missing": 12,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 98304,
+        "direct_prediction_count": 49152,
+        "positive_reference_omission_count": 2766
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 49152,
+      "failed_pathlines": 0,
+      "failed_rate": 0.0
+    },
+    "doublegyre2d/calibration": {
+      "metrics": {
+        "tp": 726,
+        "fp": 3,
+        "fn": 7,
+        "tn": 26596,
+        "observed_known": 27332,
+        "precision": 0.9958847736625515,
+        "recall": 0.990450204638472,
+        "f1": 0.9931600547195623,
+        "iou": 0.9864130434782609,
+        "auprc": 0.9996032155561523
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 98292,
+            "covered": 34380,
+            "missing": 63912,
+            "coverage": 0.34977414235136123
+          },
+          "known_positive": {
+            "total": 1866,
+            "covered": 733,
+            "missing": 1133,
+            "coverage": 0.3928188638799571
+          },
+          "known_negative": {
+            "total": 79174,
+            "covered": 26599,
+            "missing": 52575,
+            "coverage": 0.33595624826331877
+          },
+          "unknown": {
+            "total": 17252,
+            "covered": 7048,
+            "missing": 10204,
+            "coverage": 0.40853234407604916
+          },
+          "solid": {
+            "total": 12,
+            "covered": 0,
+            "missing": 12,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 98304,
+        "direct_prediction_count": 49152,
+        "positive_reference_omission_count": 1133
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 49152,
+      "failed_pathlines": 0,
+      "failed_rate": 0.0
+    },
+    "fourcenters2d/train": {
+      "metrics": {
+        "tp": 1502,
+        "fp": 3,
+        "fn": 2,
+        "tn": 16973,
+        "observed_known": 18480,
+        "precision": 0.9980066445182725,
+        "recall": 0.9986702127659575,
+        "f1": 0.9983383183781988,
+        "iou": 0.9966821499668215,
+        "auprc": 0.9999860360889398
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 49152,
+            "covered": 22940,
+            "missing": 26212,
+            "coverage": 0.4667154947916667
+          },
+          "known_positive": {
+            "total": 2452,
+            "covered": 1504,
+            "missing": 948,
+            "coverage": 0.6133768352365416
+          },
+          "known_negative": {
+            "total": 39344,
+            "covered": 16976,
+            "missing": 22368,
+            "coverage": 0.43147620984139895
+          },
+          "unknown": {
+            "total": 7356,
+            "covered": 4460,
+            "missing": 2896,
+            "coverage": 0.6063077759651985
+          },
+          "solid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 49152,
+        "direct_prediction_count": 35880,
+        "positive_reference_omission_count": 948
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 37632,
+      "failed_pathlines": 1752,
+      "failed_rate": 0.046556122448979595
+    },
+    "fourcenters2d/calibration": {
+      "metrics": {
+        "tp": 1492,
+        "fp": 2,
+        "fn": 8,
+        "tn": 16980,
+        "observed_known": 18482,
+        "precision": 0.998661311914324,
+        "recall": 0.9946666666666667,
+        "f1": 0.9966599866399466,
+        "iou": 0.9933422103861518,
+        "auprc": 0.9999707011798116
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 49152,
+            "covered": 22954,
+            "missing": 26198,
+            "coverage": 0.4670003255208333
+          },
+          "known_positive": {
+            "total": 2472,
+            "covered": 1500,
+            "missing": 972,
+            "coverage": 0.6067961165048543
+          },
+          "known_negative": {
+            "total": 39320,
+            "covered": 16982,
+            "missing": 22338,
+            "coverage": 0.4318921668362157
+          },
+          "unknown": {
+            "total": 7360,
+            "covered": 4472,
+            "missing": 2888,
+            "coverage": 0.6076086956521739
+          },
+          "solid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 49152,
+        "direct_prediction_count": 35886,
+        "positive_reference_omission_count": 972
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 37632,
+      "failed_pathlines": 1746,
+      "failed_rate": 0.046396683673469385
+    },
+    "jungtelziemniak2d/train": {
+      "metrics": {
+        "tp": 2166,
+        "fp": 0,
+        "fn": 13,
+        "tn": 18707,
+        "observed_known": 20886,
+        "precision": 1.0,
+        "recall": 0.9940339605323543,
+        "f1": 0.9970080552359033,
+        "iou": 0.9940339605323543,
+        "auprc": 1.0
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 269964,
+            "covered": 26065,
+            "missing": 243899,
+            "coverage": 0.09654991035841816
+          },
+          "known_positive": {
+            "total": 14258,
+            "covered": 2179,
+            "missing": 12079,
+            "coverage": 0.15282648337775284
+          },
+          "known_negative": {
+            "total": 217139,
+            "covered": 18707,
+            "missing": 198432,
+            "coverage": 0.08615218822965934
+          },
+          "unknown": {
+            "total": 38567,
+            "covered": 5179,
+            "missing": 33388,
+            "coverage": 0.13428578836829413
+          },
+          "solid": {
+            "total": 36,
+            "covered": 0,
+            "missing": 36,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 270000,
+        "direct_prediction_count": 37457,
+        "positive_reference_omission_count": 12079
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 49152,
+      "failed_pathlines": 11695,
+      "failed_rate": 0.23793538411458334
+    },
+    "jungtelziemniak2d/calibration": {
+      "metrics": {
+        "tp": 2098,
+        "fp": 2,
+        "fn": 8,
+        "tn": 18507,
+        "observed_known": 20615,
+        "precision": 0.9990476190476191,
+        "recall": 0.9962013295346629,
+        "f1": 0.997622444127437,
+        "iou": 0.9952561669829222,
+        "auprc": 0.9998824595388474
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 269964,
+            "covered": 26142,
+            "missing": 243822,
+            "coverage": 0.09683513357336533
+          },
+          "known_positive": {
+            "total": 13748,
+            "covered": 2106,
+            "missing": 11642,
+            "coverage": 0.15318591795170206
+          },
+          "known_negative": {
+            "total": 215803,
+            "covered": 18509,
+            "missing": 197294,
+            "coverage": 0.08576803844246836
+          },
+          "unknown": {
+            "total": 40413,
+            "covered": 5527,
+            "missing": 34886,
+            "coverage": 0.13676292282186425
+          },
+          "solid": {
+            "total": 36,
+            "covered": 0,
+            "missing": 36,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 270000,
+        "direct_prediction_count": 37572,
+        "positive_reference_omission_count": 11642
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 49152,
+      "failed_pathlines": 11580,
+      "failed_rate": 0.235595703125
+    },
+    "pipedcylinder2d/train": {
+      "metrics": {
+        "tp": 2207,
+        "fp": 446,
+        "fn": 215,
+        "tn": 24445,
+        "observed_known": 27313,
+        "precision": 0.8318884281944968,
+        "recall": 0.9112303881090008,
+        "f1": 0.8697536945812808,
+        "iou": 0.7695258019525802,
+        "auprc": 0.9516479253142671
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 117861,
+            "covered": 34215,
+            "missing": 83646,
+            "coverage": 0.29029959019523
+          },
+          "known_positive": {
+            "total": 6769,
+            "covered": 2422,
+            "missing": 4347,
+            "coverage": 0.3578076525336091
+          },
+          "known_negative": {
+            "total": 87951,
+            "covered": 24891,
+            "missing": 63060,
+            "coverage": 0.28300985776170823
+          },
+          "unknown": {
+            "total": 23141,
+            "covered": 6902,
+            "missing": 16239,
+            "coverage": 0.2982585022254872
+          },
+          "solid": {
+            "total": 84639,
+            "covered": 0,
+            "missing": 84639,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 202500,
+        "direct_prediction_count": 47541,
+        "positive_reference_omission_count": 4347
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 49152,
+      "failed_pathlines": 1611,
+      "failed_rate": 0.03277587890625
+    },
+    "pipedcylinder2d/calibration": {
+      "metrics": {
+        "tp": 1793,
+        "fp": 394,
+        "fn": 160,
+        "tn": 23753,
+        "observed_known": 26100,
+        "precision": 0.8198445358939186,
+        "recall": 0.9180747567844342,
+        "f1": 0.866183574879227,
+        "iou": 0.763953983809118,
+        "auprc": 0.9515569128679555
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 117861,
+            "covered": 34293,
+            "missing": 83568,
+            "coverage": 0.29096138671825283
+          },
+          "known_positive": {
+            "total": 5533,
+            "covered": 1953,
+            "missing": 3580,
+            "coverage": 0.35297307066690764
+          },
+          "known_negative": {
+            "total": 83890,
+            "covered": 24147,
+            "missing": 59743,
+            "coverage": 0.28784122064608414
+          },
+          "unknown": {
+            "total": 28438,
+            "covered": 8193,
+            "missing": 20245,
+            "coverage": 0.28810042900344607
+          },
+          "solid": {
+            "total": 84639,
+            "covered": 0,
+            "missing": 84639,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 0,
+            "covered": 0,
+            "missing": 0,
+            "coverage": null
+          }
+        },
+        "whole_grid_count": 202500,
+        "direct_prediction_count": 47589,
+        "positive_reference_omission_count": 3580
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 49152,
+      "failed_pathlines": 1563,
+      "failed_rate": 0.03179931640625
+    },
+    "mfc_airfoil/train": {
+      "metrics": {
+        "tp": 1548,
+        "fp": 31,
+        "fn": 16,
+        "tn": 29143,
+        "observed_known": 30738,
+        "precision": 0.980367321089297,
+        "recall": 0.989769820971867,
+        "f1": 0.9850461342666242,
+        "iou": 0.9705329153605016,
+        "auprc": 0.9988658905641956
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 10684140,
+            "covered": 35652,
+            "missing": 10648488,
+            "coverage": 0.003336908726392578
+          },
+          "known_positive": {
+            "total": 498856,
+            "covered": 1564,
+            "missing": 497292,
+            "coverage": 0.0031351732764565324
+          },
+          "known_negative": {
+            "total": 8817559,
+            "covered": 29174,
+            "missing": 8788385,
+            "coverage": 0.003308625437039888
+          },
+          "unknown": {
+            "total": 1367725,
+            "covered": 4914,
+            "missing": 1362811,
+            "coverage": 0.0035928275055292546
+          },
+          "solid": {
+            "total": 6816,
+            "covered": 0,
+            "missing": 6816,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 1044,
+            "covered": 0,
+            "missing": 1044,
+            "coverage": 0.0
+          }
+        },
+        "whole_grid_count": 10692000,
+        "direct_prediction_count": 47520,
+        "positive_reference_omission_count": 497292
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 49152,
+      "failed_pathlines": 1632,
+      "failed_rate": 0.033203125
+    },
+    "mfc_airfoil/calibration": {
+      "metrics": {
+        "tp": 2199,
+        "fp": 78,
+        "fn": 4,
+        "tn": 26685,
+        "observed_known": 28966,
+        "precision": 0.9657444005270093,
+        "recall": 0.9981842941443486,
+        "f1": 0.9816964285714286,
+        "iou": 0.964050854888207,
+        "auprc": 0.999168675800428
+      },
+      "support": {
+        "denominators": {
+          "valid_fluid": {
+            "total": 10684140,
+            "covered": 35652,
+            "missing": 10648488,
+            "coverage": 0.003336908726392578
+          },
+          "known_positive": {
+            "total": 653524,
+            "covered": 2203,
+            "missing": 651321,
+            "coverage": 0.003370955007008159
+          },
+          "known_negative": {
+            "total": 8024661,
+            "covered": 26763,
+            "missing": 7997898,
+            "coverage": 0.003335094155379274
+          },
+          "unknown": {
+            "total": 2005955,
+            "covered": 6686,
+            "missing": 1999269,
+            "coverage": 0.0033330757669040433
+          },
+          "solid": {
+            "total": 6816,
+            "covered": 0,
+            "missing": 6816,
+            "coverage": 0.0
+          },
+          "invalid": {
+            "total": 1044,
+            "covered": 0,
+            "missing": 1044,
+            "coverage": 0.0
+          }
+        },
+        "whole_grid_count": 10692000,
+        "direct_prediction_count": 47520,
+        "positive_reference_omission_count": 651321
+      },
+      "frame_count": 3,
+      "attempted_pathlines": 49152,
+      "failed_pathlines": 1632,
+      "failed_rate": 0.033203125
+    }
+  },
+  "macro": {
+    "train": {
+      "old_six": {
+        "source_count": 6,
+        "weighting": "equal source after pooling frames",
+        "evaluable_source_counts": {
+          "precision": 6,
+          "recall": 6,
+          "f1": 6,
+          "iou": 6,
+          "auprc": 6
+        },
+        "precision": 0.9680009167058269,
+        "recall": 0.973474862693189,
+        "f1": 0.970403629945613,
+        "iou": 0.9460873980189831,
+        "auprc": 0.991134614707244
+      },
+      "mfc": {
+        "source_count": 1,
+        "weighting": "equal source after pooling frames",
+        "evaluable_source_counts": {
+          "precision": 1,
+          "recall": 1,
+          "f1": 1,
+          "iou": 1,
+          "auprc": 1
+        },
+        "precision": 0.980367321089297,
+        "recall": 0.989769820971867,
+        "f1": 0.9850461342666242,
+        "iou": 0.9705329153605016,
+        "auprc": 0.9988658905641956
+      },
+      "seven": {
+        "source_count": 7,
+        "weighting": "equal source after pooling frames",
+        "evaluable_source_counts": {
+          "precision": 7,
+          "recall": 7,
+          "f1": 7,
+          "iou": 7,
+          "auprc": 7
+        },
+        "precision": 0.9697675459034655,
+        "recall": 0.9758027138758573,
+        "f1": 0.972495416277186,
+        "iou": 0.9495796147820572,
+        "auprc": 0.9922390826868084
+      }
+    },
+    "calibration": {
+      "old_six": {
+        "source_count": 6,
+        "weighting": "equal source after pooling frames",
+        "evaluable_source_counts": {
+          "precision": 6,
+          "recall": 6,
+          "f1": 6,
+          "iou": 6,
+          "auprc": 6
+        },
+        "precision": 0.9643261036943914,
+        "recall": 0.9552785801324752,
+        "f1": 0.9586995051113507,
+        "iou": 0.9246711008834408,
+        "auprc": 0.9899957799044211
+      },
+      "mfc": {
+        "source_count": 1,
+        "weighting": "equal source after pooling frames",
+        "evaluable_source_counts": {
+          "precision": 1,
+          "recall": 1,
+          "f1": 1,
+          "iou": 1,
+          "auprc": 1
+        },
+        "precision": 0.9657444005270093,
+        "recall": 0.9981842941443486,
+        "f1": 0.9816964285714286,
+        "iou": 0.964050854888207,
+        "auprc": 0.999168675800428
+      },
+      "seven": {
+        "source_count": 7,
+        "weighting": "equal source after pooling frames",
+        "evaluable_source_counts": {
+          "precision": 7,
+          "recall": 7,
+          "f1": 7,
+          "iou": 7,
+          "auprc": 7
+        },
+        "precision": 0.9645287175276225,
+        "recall": 0.9614079678484571,
+        "f1": 0.9619847798913618,
+        "iou": 0.9302967800269789,
+        "auprc": 0.9913061936038507
+      }
+    }
+  },
+  "frame_plan_file": "../protocol.json",
+  "prediction_arrays_included": false,
+  "data_and_reference_arrays_included": false
+}

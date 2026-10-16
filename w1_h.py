@@ -3,8 +3,8 @@
 本模块把票 02 生成的 source-specific Haller train artifact 接到票 05
 已经验证过的 7-channel、masked anchor BCE、EMA teacher、confident
 pseudo-label、consistency 和 ramp-up 训练基础设施上。standard Haller-IVD
-只在 artifact/anchor 侧出现；模型仍接收当前 5x5 local-IVD 的
-``[px, py, t, ivd, distance, u, v]`` 输入。
+只在 artifact/anchor 侧出现；模型仍接收 ``[px, py, t, ivd, distance, u, v]``
+输入，其中 ``ivd`` 必须来自与 Haller anchor 相同的 standard-IVD source。
 
 Haller 原始文献的 Zotero 候选为 ``L2PX3NQX``，当前工程只确认公式和二维
 流程骨架；离散工程参数仍是 ``pending_verification``，不能在这里表述为
@@ -29,6 +29,7 @@ import torch.nn.functional as F
 
 import extractor
 import haller_anchors
+import standard_ivd
 import weak_supervision_contract as contract
 from w1_p import (
     W1PConfig,
@@ -50,7 +51,7 @@ W1H_DEFAULT_EMA_DECAY = 0.99
 W1H_DEFAULT_RAMP_UP_EPOCHS = 12
 W1H_ALLOWED_SAMPLING_SOURCES = frozenset({
     contract.LABEL_SOURCE_LEGACY_P85,
-    contract.LABEL_SOURCE_LOCAL_P90_P60,
+    contract.LABEL_SOURCE_P95P80,
 })
 
 
@@ -134,6 +135,11 @@ class HallerTrainAnchor:
                                       haller_anchors.NEGATIVE,
                                       haller_anchors.POSITIVE])):
             raise ValueError("W1-H anchor_state 含有未知三态编码")
+        if np.any(state == haller_anchors.NEGATIVE):
+            raise ValueError(
+                "W1-H 只接受 sparse positive Haller evidence；"
+                "dense negative anchor 不能进入训练"
+            )
         if np.any(solid & (state != haller_anchors.UNKNOWN)):
             raise ValueError("W1-H solid cells 必须保持 unknown")
         if np.any(failed & ~solid & (state != haller_anchors.UNKNOWN)):
@@ -155,6 +161,10 @@ class HallerTrainAnchor:
             raise ValueError("W1-H Haller artifact 禁止 legacy_p85 fallback")
         if metadata.get("fallback_used") is not None:
             raise ValueError("W1-H Haller artifact 不允许 fallback")
+        if metadata.get("ivd_source_identity") != standard_ivd.SOURCE_IDENTITY:
+            raise ValueError(
+                "W1-H Haller artifact 必须使用当前 standard IVD source identity"
+            )
         expected_failure_count = _strict_nonnegative_int(
             metadata["failure_count"], name="metadata.failure_count")
         failure_count = _strict_nonnegative_int(
@@ -446,7 +456,7 @@ def _artifact_roots_for_dataset(
 
 
 class HallerAnchorPathlineDataset:
-    """把当前 5×5 local-IVD pathline window 换成 W1-H train anchor batch。
+    """把 shared standard-IVD pathline window 换成 W1-H train anchor batch。
 
     ``base_dataset`` 仍负责 split-safe window、重播种和 7-channel pathline 提取；
     其 label field 只参与既有 sampling pool。formal labels 完全来自显式
@@ -564,7 +574,23 @@ class HallerAnchorPathlineDataset:
             _strict_nonnegative_int(frame, name="frame_index"),
         )
 
-    def _sample(self, si: Any, py: Any, px: Any, frame: Any) -> W1HBatch:
+    def _sample_from_base(
+        self,
+        base_sample: Any,
+        si: Any,
+        py: Any,
+        px: Any,
+        frame: Any,
+    ) -> W1HBatch:
+        """Build one Haller batch from an already extracted base sample.
+
+        Ticket 08's Hybrid stream also needs the base sample's replayed seeds
+        to project percentile states.  Requiring callers to ask this adapter
+        for a second sample would repeat the expensive CPU pathline
+        extraction.  The input is still validated through the same shape and
+        train-artifact checks as ``_sample``; only the extraction itself is
+        shared by the caller.
+        """
         si = _strict_nonnegative_int(si, name="dataset_index")
         py = _strict_nonnegative_int(py, name="patch_y")
         px = _strict_nonnegative_int(px, name="patch_x")
@@ -574,22 +600,21 @@ class HallerAnchorPathlineDataset:
         if si >= len(self._stores):
             raise IndexError(f"W1-H dataset_index={si} 超出 stores={len(self._stores)}")
         store = self._stores[si]
-        if self._multi:
-            sample = self.base_dataset.sample_at(si, py, px, frame)
-            window = self.base_dataset.window_metadata(si, frame)
-        else:
-            sample = self.base_dataset.sample_at(py, px, frame)
-            window = self.base_dataset.window_metadata(frame)
-        if (not isinstance(sample, (tuple, list)) or len(sample) != 3
-                or not isinstance(sample[0], (tuple, list)) or len(sample[0]) != 2):
+        if (not isinstance(base_sample, (tuple, list)) or len(base_sample) != 3
+                or not isinstance(base_sample[0], (tuple, list))
+                or len(base_sample[0]) != 2):
             raise ValueError(
                 "W1-H base dataset.sample_at 必须返回 ((dummy, pathlines), labels, seeds)"
             )
-        (dummy, pathlines), _sampling_labels, seeds = sample
+        if self._multi:
+            window = self.base_dataset.window_metadata(si, frame)
+        else:
+            window = self.base_dataset.window_metadata(frame)
+        (dummy, pathlines), _sampling_labels, seeds = base_sample
         pathlines = np.asarray(pathlines, dtype=np.float32)
         if pathlines.ndim != 3 or pathlines.shape[-1] != contract.FEATURE_SCHEMA_7.channel_count:
             raise ValueError(
-                "W1-H base pathlines 必须是未 batching 的 (L,K,7) local-IVD features，"
+                "W1-H base pathlines 必须是未 batching 的 (L,K,7) standard-IVD features，"
                 f"实际 shape={pathlines.shape}"
             )
         seeds = np.asarray(seeds, dtype=np.float64)
@@ -600,6 +625,17 @@ class HallerAnchorPathlineDataset:
         resolver = self.resolvers[si]
         anchor = resolver.load(frame)
         window = _validate_train_window_metadata(window, frame=frame)
+        ivd_provenance = window.get("ivd_provenance")
+        if (not isinstance(ivd_provenance, Mapping)
+                or ivd_provenance.get("source_identity") != standard_ivd.SOURCE_IDENTITY
+                or ivd_provenance.get("formula") != standard_ivd.FORMULA):
+            raise ValueError(
+                "W1-H base dataset 必须声明当前 shared standard IVD provenance"
+            )
+        if anchor.metadata.get("ivd_source_identity") != standard_ivd.SOURCE_IDENTITY:
+            raise ValueError(
+                "W1-H Haller anchor 与 base dataset 的 standard IVD source identity 不一致"
+            )
         provenance = {
             "window": copy.deepcopy(dict(window)),
             "sampling": {
@@ -616,6 +652,50 @@ class HallerAnchorPathlineDataset:
             dummy_field=np.asarray(dummy, dtype=np.float32),
             anchor_hash_override=resolver.anchor_hash,
         )
+
+    def _sample(self, si: Any, py: Any, px: Any, frame: Any) -> W1HBatch:
+        """Extract one base window and attach its train Haller artifact."""
+        si = _strict_nonnegative_int(si, name="dataset_index")
+        py = _strict_nonnegative_int(py, name="patch_y")
+        px = _strict_nonnegative_int(px, name="patch_x")
+        frame = _strict_nonnegative_int(frame, name="frame_index")
+        if self._multi:
+            base_sample = self.base_dataset.sample_at(si, py, px, frame)
+        else:
+            if si != 0:
+                raise ValueError(
+                    f"W1-H single dataset 的 dataset_index 必须为 0，实际 {si}"
+                )
+            base_sample = self.base_dataset.sample_at(py, px, frame)
+        return self._sample_from_base(base_sample, si, py, px, frame)
+
+    def sample_at_from_base(
+        self, base_sample: Any, *indices: Any
+    ) -> W1HBatch:
+        """Attach the train Haller artifact without repeating base extraction.
+
+        For a multi-dataset wrapper ``indices`` is
+        ``(dataset_index, patch_y, patch_x, frame)``.  A single-dataset
+        wrapper accepts ``(patch_y, patch_x, frame)``.  The caller must obtain
+        ``base_sample`` from this adapter's ``base_dataset`` with the same
+        indices; this explicit contract keeps the reuse auditable and avoids
+        an implicit cache keyed by mutable sampling state.
+        """
+        if self._multi:
+            if len(indices) != 4:
+                raise TypeError(
+                    "W1-H multi sample_at_from_base 需要 "
+                    "(base_sample, dataset_index, py, px, frame)"
+                )
+            si, py, px, frame = indices
+        else:
+            if len(indices) != 3:
+                raise TypeError(
+                    "W1-H sample_at_from_base 需要 (base_sample, py, px, frame)"
+                )
+            si = 0
+            py, px, frame = indices
+        return self._sample_from_base(base_sample, si, py, px, frame)
 
     def sample_at(self, *indices: Any) -> W1HBatch:
         """直接读取一个 train window；单/多数据集参数顺序与 base 保持一致。"""
@@ -689,6 +769,12 @@ def collate_w1_h_batches(batches: Any) -> W1HBatch:
             )
         windows.append(copy.deepcopy(dict(batch_window)))
     combined_metadata = copy.deepcopy(dict(first.anchor_metadata or {}))
+    first_anchor = dict(first.contract_batch.provenance.get("anchor", {}))
+    combined_metadata.setdefault(
+        "ivd_source_identity",
+        copy.deepcopy(first_anchor.get("ivd_source_identity")),
+    )
+    combined_metadata.setdefault("ivd_formula", first_anchor.get("ivd_formula"))
     combined_metadata["batch_artifacts"] = anchor_items
     combined_metadata["anchor_hash"] = first.anchor_hash
     combined_anchor = copy.deepcopy(dict(first.anchor_metadata or {}))
@@ -774,6 +860,14 @@ class W1HBatch:
             raise ValueError("W1-H batch anchor provenance source 必须是 haller_anchor_train")
         if anchor_provenance.get("anchor_hash") not in (None, self.anchor_hash):
             raise ValueError("W1-H batch anchor provenance hash 与 batch anchor_hash 不一致")
+        if anchor_provenance.get("ivd_source_identity") != standard_ivd.SOURCE_IDENTITY:
+            raise ValueError(
+                "W1-H batch anchor provenance 必须绑定当前 standard IVD source identity"
+            )
+        if anchor_provenance.get("ivd_formula") != standard_ivd.FORMULA:
+            raise ValueError(
+                "W1-H batch anchor provenance 必须绑定当前 standard IVD formula"
+            )
         sampling_provenance = dict(batch.provenance.get("sampling", {}))
         if sampling_provenance.get("source") not in (None, sampling_source):
             raise ValueError("W1-H batch sampling provenance source 与 sampling_source 不一致")
@@ -782,6 +876,14 @@ class W1HBatch:
                 raise TypeError("W1-H anchor_metadata 必须是 object")
             if self.anchor_metadata.get("source") not in (None, W1H_LABEL_SOURCE):
                 raise ValueError("W1-H anchor_metadata source 必须是 haller_anchor_train")
+            if self.anchor_metadata.get("ivd_source_identity") != standard_ivd.SOURCE_IDENTITY:
+                raise ValueError(
+                    "W1-H anchor_metadata 必须绑定当前 standard IVD source identity"
+                )
+            if self.anchor_metadata.get("ivd_formula") != standard_ivd.FORMULA:
+                raise ValueError(
+                    "W1-H anchor_metadata 必须绑定当前 standard IVD formula"
+                )
             self.anchor_metadata = copy.deepcopy(dict(self.anchor_metadata))
         if self.dummy_field is None:
             if isinstance(batch.pathlines, torch.Tensor):
@@ -794,7 +896,7 @@ class W1HBatch:
 
     @property
     def pathlines(self) -> Any:
-        """model-facing 7-channel local-IVD pathlines。"""
+        """model-facing 7-channel pathlines with shared standard IVD。"""
         return self.contract_batch.pathlines
 
     @property
@@ -901,6 +1003,10 @@ def build_w1_h_batch(
     anchor_provenance = dict(sources.get("anchor", {}))
     anchor_provenance.setdefault("source", W1H_LABEL_SOURCE)
     anchor_provenance.setdefault("anchor_hash", anchor_hash)
+    anchor_provenance.setdefault(
+        "ivd_source_identity", copy.deepcopy(standard_ivd.SOURCE_IDENTITY)
+    )
+    anchor_provenance.setdefault("ivd_formula", standard_ivd.FORMULA)
     sources["anchor"] = anchor_provenance
     sampling_provenance = dict(sources.get("sampling", {}))
     sampling_provenance.setdefault("source", sampling_source)
@@ -1162,6 +1268,14 @@ class W1HTrainer:
         if self.anchor_metadata is not None:
             if self.anchor_metadata.get("source") not in (None, W1H_LABEL_SOURCE):
                 raise ValueError("W1-H anchor_metadata source 必须是 haller_anchor_train")
+            if self.anchor_metadata.get("ivd_source_identity") != standard_ivd.SOURCE_IDENTITY:
+                raise ValueError(
+                    "W1-H trainer anchor_metadata 必须绑定当前 standard IVD source identity"
+                )
+            if self.anchor_metadata.get("ivd_formula") != standard_ivd.FORMULA:
+                raise ValueError(
+                    "W1-H trainer anchor_metadata 必须绑定当前 standard IVD formula"
+                )
             for field in ("algorithm_version", "parameter_hash", "input_hash", "mask_hash"):
                 if field not in self.anchor_metadata:
                     raise ValueError(f"W1-H anchor_metadata 缺少 {field}")

@@ -1,0 +1,19 @@
+{
+  "common_observed_cells": 11884,
+  "changed_prediction_count_cells": 0,
+  "changed_finite_probability_cells": 0,
+  "maximum_abs_probability_difference": 0.0,
+  "mean_abs_probability_difference": 0.0,
+  "checkpoint": "epoch_0100.pt",
+  "identity": [
+    "mfc_airfoil",
+    "calibration",
+    400
+  ],
+  "seed": 1,
+  "model_view_seed": 1738685554,
+  "original_model_view_seed": 1738685554,
+  "inference_batch_size": 16,
+  "elapsed_seconds": 8.928617342025973,
+  "scope": "ordinary real single-view measurement; no selection rule"
+}

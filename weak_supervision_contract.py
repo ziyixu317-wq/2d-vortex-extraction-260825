@@ -26,6 +26,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+import experiment_protocol as protocol
+
 
 class MethodMode(str, Enum):
     """弱监督 feature 注册的 canonical method mode。"""
@@ -35,7 +37,9 @@ class MethodMode(str, Enum):
     W1 = "W1"
     W1_P = "W1-P"
     W1_H = "W1-H"
+    W1_HYBRID = "W1-Hybrid"
     W2 = "W2"
+    W2_ON_HYBRID = "W2-on-Hybrid"
     W3 = "W3"
 
 
@@ -44,7 +48,9 @@ MODE_B1 = MethodMode.B1.value
 MODE_W1 = MethodMode.W1.value
 MODE_W1_P = MethodMode.W1_P.value
 MODE_W1_H = MethodMode.W1_H.value
+MODE_W1_HYBRID = MethodMode.W1_HYBRID.value
 MODE_W2 = MethodMode.W2.value
+MODE_W2_ON_HYBRID = MethodMode.W2_ON_HYBRID.value
 MODE_W3 = MethodMode.W3.value
 
 
@@ -136,12 +142,18 @@ FEATURE_SCHEMA_6 = FeatureSchema(
 
 
 LABEL_SOURCE_LEGACY_P85 = "legacy_p85"
+# Ticket 03 is the only current percentile source.  The historical P90/P60
+# string remains registered below solely so old evidence can be identified and
+# rejected by current consumers; it is not an active method source.
+LABEL_SOURCE_P95P80 = protocol.P95P80_PERCENTILE_SOURCE_ID
+LABEL_SOURCE_STANDARD_IVD_P95_P80 = LABEL_SOURCE_P95P80
 LABEL_SOURCE_LOCAL_P90_P60 = "local_p90_p60"
 LABEL_SOURCE_HALLER_TRAIN = "haller_anchor_train"
 LABEL_SOURCE_HALLER_CALIBRATION = "haller_gt_calibration"
 LABEL_SOURCE_HALLER_TEST = "haller_gt_test"
 VALID_LABEL_SOURCES = (
     LABEL_SOURCE_LEGACY_P85,
+    LABEL_SOURCE_P95P80,
     LABEL_SOURCE_LOCAL_P90_P60,
     LABEL_SOURCE_HALLER_TRAIN,
     LABEL_SOURCE_HALLER_CALIBRATION,
@@ -173,7 +185,13 @@ _MODE_ALIASES = {
     "w1-h": MODE_W1_H,
     "w1_h": MODE_W1_H,
     "w1h": MODE_W1_H,
+    "w1-hybrid": MODE_W1_HYBRID,
+    "w1_hybrid": MODE_W1_HYBRID,
+    "w1hybrid": MODE_W1_HYBRID,
     "w2": MODE_W2,
+    "w2-on-hybrid": MODE_W2_ON_HYBRID,
+    "w2_on_hybrid": MODE_W2_ON_HYBRID,
+    "w2onhybrid": MODE_W2_ON_HYBRID,
     "w3": MODE_W3,
 }
 
@@ -189,19 +207,27 @@ _MODE_SPECS = {
     ),
     MODE_W1: ModeSpec(
         MODE_W1, FEATURE_SCHEMA_7, FEATURE_SCHEMA_7,
-        ("local_p90_p60", "haller_anchor_train"), True, False,
+        (LABEL_SOURCE_P95P80, LABEL_SOURCE_HALLER_TRAIN), True, False,
     ),
     MODE_W1_P: ModeSpec(
-        MODE_W1_P, FEATURE_SCHEMA_7, FEATURE_SCHEMA_7, ("local_p90_p60",),
+        MODE_W1_P, FEATURE_SCHEMA_7, FEATURE_SCHEMA_7, (LABEL_SOURCE_P95P80,),
         True, False,
     ),
     MODE_W1_H: ModeSpec(
         MODE_W1_H, FEATURE_SCHEMA_7, FEATURE_SCHEMA_7,
         ("haller_anchor_train",), True, False,
     ),
+    MODE_W1_HYBRID: ModeSpec(
+        MODE_W1_HYBRID, FEATURE_SCHEMA_7, FEATURE_SCHEMA_7,
+        (LABEL_SOURCE_P95P80, LABEL_SOURCE_HALLER_TRAIN), True, False,
+    ),
     MODE_W2: ModeSpec(
         MODE_W2, FEATURE_SCHEMA_7, FEATURE_SCHEMA_7,
         ("haller_anchor_train",), True, False,
+    ),
+    MODE_W2_ON_HYBRID: ModeSpec(
+        MODE_W2_ON_HYBRID, FEATURE_SCHEMA_7, FEATURE_SCHEMA_7,
+        (LABEL_SOURCE_P95P80, LABEL_SOURCE_HALLER_TRAIN), True, False,
     ),
     MODE_W3: ModeSpec(
         MODE_W3, FEATURE_SCHEMA_7, FEATURE_SCHEMA_7,
@@ -559,6 +585,12 @@ _TEST_ONLY_KEY_EXCEPTIONS = frozenset({
     # they do not carry test labels or metrics into a train/calibration seam.
     "failure_fallback_calibration_test",
     "haller_gt_test_artifact_read",
+    "test_policy",
+    # Ticket 03 artifacts carry these booleans/lists as explicit no-read
+    # audit declarations.  They do not carry test values or relationships.
+    "test_source_read",
+    "test_frame_indices_read",
+    "test_values_read",
 })
 
 
@@ -619,6 +651,7 @@ def _validate_source_split(source: str | None, split_name: str, *, context: str)
     """执行 Haller source 与 checkpoint/batch split 的一一对应 guard。"""
     required_split = {
         LABEL_SOURCE_LEGACY_P85: "train",
+        LABEL_SOURCE_P95P80: "train",
         LABEL_SOURCE_LOCAL_P90_P60: "train",
         LABEL_SOURCE_HALLER_TRAIN: "train",
         LABEL_SOURCE_HALLER_CALIBRATION: "calibration",

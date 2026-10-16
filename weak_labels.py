@@ -1,18 +1,18 @@
-"""弱标签（weak_labels.py）——04 票：弱标注生成器（IVD/Q-criterion + τ 定值）。
+"""弱标签生成器 backed by the shared Haller standard-IVD source.
 
 领域词汇（HANDOFF §4/§6，唯一权威）：
 - 涡量 ω = ∂v/∂x − ∂u/∂y（中心差分，边界单边一阶；等距网格）；
-- IVD = |ω − 5×5 局部邻域均值|：邻域窗口含中心（25 格），边界 edge pad
-  （与 extractor 越界 clamp 同语义）；
-- 固体区 IVD=0（依赖票 02 掩膜；geometry_meta/mask.npy 逐数据集预处理，
-  本模块接受 (Y,X) 或 (T,Y,X) 掩膜，取第 0 帧）；
+- IVD = |ω − omega_bar|，其中 omega_bar 是每帧 valid-fluid support 上的
+  有符号涡量均值；计算实现由 ``standard_ivd`` 统一提供；
+- solid/invalid 区的存储值为 0，但必须通过显式 mask 解读，不能当作 valid
+  negative；
 - 标签 = 种子点处 IVD ≥ τ（默认 85 分位数、逐时间片）+ 5×5 最小面积
   （min_area=25 格）连通域过滤（复用 geometry.label_components，8 邻接）；
 - τ 的分位数在**流体区**统计（排除固体 0 值，避免其 41.8% 占比污染）；
 - 正样本 = patch 内存在 ≥1 条涡迹线（t0 帧标签场在 patch 内有正格）；
 - 2D Q-criterion Q = ‖Ω‖²/2 − ‖S‖²/2 = −(∂u/∂y)(∂v/∂x) − ½[(∂u/∂x)² + (∂v/∂y)²]，
   仅作参考图目检对照（HANDOFF §6 风险预案：备选 Q-criterion 标签对照）；
-- 多阈值敏感性报告（multi_tau_report，票 07 延伸）：对既有 IVD 场重算
+- 多阈值敏感性报告（multi_tau_report，票 07 延伸）：对既有 standard IVD 场重算
   95/90/85/80 分位 + 固定阈值 × 面积过滤的标签覆盖率/连通块数/正样本占比
   统计与目检图（含论文 Fig.6 列 1 风格的 IVD 白色等值线）——HANDOFF §7
   风险预案「多阈值敏感性报告」的落地。
@@ -31,6 +31,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 
 import extractor
 import geometry
+import standard_ivd
 
 # --------------------------------------------------------------------------- 时间片划分（HANDOFF §6）
 
@@ -92,20 +93,18 @@ def _diff(field, axis, d):
 
 
 def vorticity(u, v, xdim, ydim):
-    """涡量 ω = ∂v/∂x − ∂u/∂y（中心差分，边界单边一阶；HANDOFF §4）。
-
-    返回 (T,Y,X) float64（输入可为 (Y,X)，返回同形状）。"""
-    u = np.asarray(u, dtype=np.float64)
-    v = np.asarray(v, dtype=np.float64)
-    dx = _spacing(xdim, "xdim")
-    dy = _spacing(ydim, "ydim")
-    return _diff(v, -1, dx) - _diff(u, -2, dy)
+    """涡量 ``omega = d(v)/d(x) - d(u)/d(y)`` from the shared source."""
+    return standard_ivd.vorticity(u, v, xdim, ydim)
 
 
-# --------------------------------------------------------------------------- 5×5 邻域均值 / IVD
+# --------------------------------------------------------------------------- 历史邻域诊断 / standard IVD
 
 def neighborhood_mean(field, k=5):
-    """k×k 局部邻域均值（窗口含中心；边界 edge pad——与 extractor clamp 语义一致）。
+    """Return a generic local mean for historical diagnostics only.
+
+    This helper is deliberately not used by any IVD entry point.  Keeping it
+    available avoids changing unrelated diagnostic callers, while the IVD
+    seam below rejects its former ``k`` parameter explicitly.
 
     输入 2D (Y,X) 或 3D (T,Y,X)，返回同形状 float64。pad p=k//2 后滑动窗口恰好
     与输入同尺寸（edge pad 下每格窗口恒 k×k = 25 格，无归一化歧义）。
@@ -120,23 +119,100 @@ def neighborhood_mean(field, k=5):
     return win.mean(axis=(-2, -1))
 
 
-def ivd_from_vorticity(omega, k=5):
-    """IVD = |ω − k×k 局部邻域均值|（HANDOFF §4：5×5 邻域均值）。"""
-    omega = np.asarray(omega, dtype=np.float64)
-    return np.abs(omega - neighborhood_mean(omega, k=k))
+def _reject_legacy_ivd_parameter(k):
+    """Reject the former local-neighborhood IVD knob instead of ignoring it."""
+    if k is not None:
+        raise ValueError(
+            "local/neighborhood IVD window is unsupported by the standard IVD "
+            "protocol; remove k/5x5 parameter"
+        )
 
 
-def compute_ivd(u, v, xdim, ydim, mask=None, k=5):
-    """完整 IVD 场：ω → IVD → 固体区 IVD=0（验收 4）。
+def compute_standard_ivd_details(
+    u,
+    v,
+    xdim,
+    ydim,
+    mask=None,
+    *,
+    valid_fluid_mask=None,
+    invalid_mask=None,
+    input_identity=None,
+):
+    """Return the shared standard-IVD result and its auditable masks."""
+    return standard_ivd.compute_standard_ivd_details(
+        u,
+        v,
+        xdim,
+        ydim,
+        solid_mask=mask,
+        valid_fluid_mask=valid_fluid_mask,
+        invalid_mask=invalid_mask,
+        input_identity=input_identity,
+    )
 
-    mask 为 (Y,X) 或 (T,Y,X) 固体掩膜（None = 无障碍物数据集的空路径）。
-    返回与输入同形状 float64（(T,Y,X) 或 (Y,X)，vorticity 保形）。
+
+def ivd_from_vorticity(
+    omega,
+    k=None,
+    *,
+    mask=None,
+    valid_fluid_mask=None,
+    invalid_mask=None,
+    xdim=None,
+    ydim=None,
+    input_identity=None,
+    return_details=False,
+):
+    """Compute ``abs(omega - mean_fluid(omega))`` from a vorticity field.
+
+    ``k`` remains in the signature solely to fail loudly for old callers; no
+    local or neighborhood mean is available through this compatibility seam.
     """
-    ivd = ivd_from_vorticity(vorticity(u, v, xdim, ydim), k=k)
-    if mask is not None:
-        m2 = _mask2d(mask)
-        ivd[:, m2] = 0.0        # 固体区置零（逐帧广播）
-    return ivd
+    _reject_legacy_ivd_parameter(k)
+    details = standard_ivd.compute_standard_ivd_from_vorticity(
+        omega,
+        solid_mask=mask,
+        valid_fluid_mask=valid_fluid_mask,
+        invalid_mask=invalid_mask,
+        xdim=xdim,
+        ydim=ydim,
+        input_identity=input_identity,
+    )
+    return details if return_details else details.ivd
+
+
+def compute_ivd(
+    u,
+    v,
+    xdim,
+    ydim,
+    mask=None,
+    k=None,
+    *,
+    valid_fluid_mask=None,
+    invalid_mask=None,
+    input_identity=None,
+    return_details=False,
+):
+    """Compute the canonical per-frame standard IVD.
+
+    ``k`` is retained only as an explicit incompatibility check for historical
+    local-IVD callers.  The numerical result is always produced by
+    :mod:`standard_ivd`, shared with the Haller anchor seam.
+    """
+    _reject_legacy_ivd_parameter(k)
+    details = compute_standard_ivd_details(
+        u,
+        v,
+        xdim,
+        ydim,
+        mask=mask,
+        valid_fluid_mask=valid_fluid_mask,
+        invalid_mask=invalid_mask,
+        input_identity=input_identity,
+    )
+    return details if return_details else details.ivd
 
 
 # --------------------------------------------------------------------------- Q-criterion（参考对照）
@@ -160,7 +236,18 @@ def q_criterion(u, v, xdim, ydim):
 
 # --------------------------------------------------------------------------- τ（逐时间片 95 分位）
 
-def compute_tau(ivd, mask, slices, percentile=DEFAULT_PERCENTILE):
+def _field_mask(mask, shape, *, name):
+    """Coerce a 2-D or matching 3-D support mask for a field."""
+    value = np.asarray(mask, dtype=bool)
+    if len(shape) == 3 and value.ndim == 2 and value.shape == shape[-2:]:
+        value = np.broadcast_to(value, shape)
+    if value.shape != shape:
+        raise ValueError(f"{name} shape={value.shape} 与 field shape={shape} 不一致")
+    return value
+
+
+def compute_tau(ivd, mask, slices, percentile=DEFAULT_PERCENTILE,
+                *, invalid_mask=None, valid_fluid_mask=None):
     """τ = 流体区 IVD 的第 percentile 百分位（默认 85 分位——票 07 延伸定案），逐时间片（HANDOFF §6）。
 
     slices: dict {name: (i0, i1)} 帧索引区间（默认 DEFAULT_SLICES 的时间划分）。
@@ -169,10 +256,19 @@ def compute_tau(ivd, mask, slices, percentile=DEFAULT_PERCENTILE):
     返回 dict {name: tau}。
     """
     ivd = np.asarray(ivd, dtype=np.float64)
-    fluid = ~_mask2d(mask) if mask is not None else np.ones(ivd.shape[1:], dtype=bool)
+    solid = _mask2d(mask) if mask is not None else np.zeros(ivd.shape[1:], dtype=bool)
+    fluid = ~solid
+    if valid_fluid_mask is not None:
+        valid = _field_mask(valid_fluid_mask, ivd.shape, name="valid_fluid_mask")
+    else:
+        valid = np.broadcast_to(fluid, ivd.shape).copy()
+    if invalid_mask is not None:
+        invalid = _field_mask(invalid_mask, ivd.shape, name="invalid_mask")
+        valid &= ~invalid
+    valid &= np.isfinite(ivd)
     taus = {}
     for name, (i0, i1) in slices.items():
-        vals = ivd[i0:i1][:, fluid]
+        vals = ivd[i0:i1][valid[i0:i1]]
         if vals.size == 0:
             raise ValueError(f"时间片 {name} ({i0}:{i1}) 无流体格")
         taus[name] = float(np.percentile(vals, float(percentile)))
@@ -186,10 +282,16 @@ def binary_label(ivd, tau):
     return np.asarray(ivd) >= float(tau)
 
 
-def _labeled_mask(ivd2d, tau, mask2d, min_area):
+def _labeled_mask(ivd2d, tau, mask2d, min_area, invalid_mask2d=None,
+                  valid_fluid_mask2d=None):
     """单帧标签 = (IVD ≥ τ) & 非固体 → 5×5 面积过滤（build_label_field 与
     plot_tau_sensitivity 的共享形状，防双份逻辑漂移）。"""
-    bin_ = binary_label(ivd2d, tau) & (~mask2d)
+    eligible = ~mask2d
+    if valid_fluid_mask2d is not None:
+        eligible &= np.asarray(valid_fluid_mask2d, dtype=bool)
+    if invalid_mask2d is not None:
+        eligible &= ~np.asarray(invalid_mask2d, dtype=bool)
+    bin_ = binary_label(ivd2d, tau) & eligible
     return filter_min_area(bin_, min_area=min_area)
 
 
@@ -210,7 +312,8 @@ def filter_min_area(label2d, min_area=DEFAULT_MIN_AREA, connectivity=8):
     return keep[labels].astype(np.uint8)
 
 
-def build_label_field(ivd, mask2d, taus, slices, min_area=DEFAULT_MIN_AREA):
+def build_label_field(ivd, mask2d, taus, slices, min_area=DEFAULT_MIN_AREA,
+                      *, invalid_mask=None, valid_fluid_mask=None):
     """标签场 = 逐时间片 τ 二值化 + 5×5 面积过滤 + 固体区强制 0。
 
     返回 (T,Y,X) uint8。taus/slices 为 {name: tau}/{name: (i0,i1)} 配对；
@@ -222,9 +325,20 @@ def build_label_field(ivd, mask2d, taus, slices, min_area=DEFAULT_MIN_AREA):
     tau_per_frame = np.full(T, np.inf, dtype=np.float64)
     for name, (i0, i1) in slices.items():
         tau_per_frame[i0:i1] = float(taus[name])
+    invalid = None if invalid_mask is None else _field_mask(
+        invalid_mask, ivd.shape, name="invalid_mask")
+    valid = None if valid_fluid_mask is None else _field_mask(
+        valid_fluid_mask, ivd.shape, name="valid_fluid_mask")
     out = np.zeros(ivd.shape, dtype=np.uint8)
     for t in range(T):
-        out[t] = _labeled_mask(ivd[t], tau_per_frame[t], m2, min_area)
+        out[t] = _labeled_mask(
+            ivd[t],
+            tau_per_frame[t],
+            m2,
+            min_area,
+            None if invalid is None else invalid[t],
+            None if valid is None else valid[t],
+        )
     return out
 
 
@@ -512,10 +626,12 @@ def plot_ivd_q(ivd2d, q2d, label2d, mask2d, xdim, ydim, out_png, tau,
 
 def plot_tau_sensitivity(ivd2d, mask2d, xdim, ydim, out_png,
                          percentiles=(90.0, 95.0, 97.5, 99.0),
-                         min_area=DEFAULT_MIN_AREA, title=""):
+                         min_area=DEFAULT_MIN_AREA, title="", *,
+                         valid_fluid_mask=None, invalid_mask=None):
     """τ 敏感性对比图：同一展示帧在多个分位数候选下的标签场并排（验收 1 支撑）。
 
     每子图标题 = 分位数值 + 该分位的 τ + 正格占比；标签应用 5×5 面积过滤。
+    分位数和标签都复用 standard IVD 的 valid-fluid/invalid mask 语义。
     返回输出路径 str。
     """
     import matplotlib
@@ -524,14 +640,39 @@ def plot_tau_sensitivity(ivd2d, mask2d, xdim, ydim, out_png,
 
     ivd2d = np.asarray(ivd2d, dtype=np.float64)
     m2 = _mask2d(mask2d) if mask2d is not None else np.zeros(ivd2d.shape, dtype=bool)
-    fluid_vals = ivd2d[~m2]
+    valid2 = None if valid_fluid_mask is None else _mask2d(valid_fluid_mask)
+    invalid2 = None if invalid_mask is None else _mask2d(invalid_mask)
+    eligible = ~m2
+    if valid2 is not None:
+        if valid2.shape != ivd2d.shape:
+            raise ValueError(
+                f"valid_fluid_mask shape={valid2.shape} 与 frame shape={ivd2d.shape} 不一致"
+            )
+        eligible &= valid2
+    if invalid2 is not None:
+        if invalid2.shape != ivd2d.shape:
+            raise ValueError(
+                f"invalid_mask shape={invalid2.shape} 与 frame shape={ivd2d.shape} 不一致"
+            )
+        eligible &= ~invalid2
+    eligible &= np.isfinite(ivd2d)
+    fluid_vals = ivd2d[eligible]
+    if fluid_vals.size == 0:
+        raise ValueError("tau sensitivity 没有可用 valid-fluid IVD 值")
     extent = [xdim[0], xdim[-1], ydim[0], ydim[-1]]
     fig, axes = plt.subplots(1, len(percentiles), figsize=(4.2 * len(percentiles), 4.5))
     if len(percentiles) == 1:
         axes = [axes]
     for ax, p in zip(axes, percentiles):
         tau = float(np.percentile(fluid_vals, p))
-        lab = _labeled_mask(ivd2d, tau, m2, min_area)
+        lab = _labeled_mask(
+            ivd2d,
+            tau,
+            m2,
+            min_area,
+            invalid_mask2d=invalid2,
+            valid_fluid_mask2d=valid2,
+        )
         ax.imshow(lab, origin="lower", aspect="auto", cmap="Greys",
                   vmin=0, vmax=1, extent=extent)
         ax.set_title(f"p{p:g}  tau={tau:.4g}\npos frac={lab.mean():.3f}")
@@ -557,7 +698,8 @@ def main(argv=None):
     import argparse
 
     ap = argparse.ArgumentParser(
-        description="弱标签：IVD（ω=∂v/∂x−∂u/∂y，5×5 邻域偏差）+ 固体置零 + "
+        description="弱标签：standard IVD（|ω−全局 valid-fluid 有符号均值|）+ "
+                    "固体/invalid 显式掩膜 + "
                     "逐时间片 τ 标签（95 分位）+ 面积过滤 + 正样本占比统计 + 目检图")
     ap.add_argument("nc_path", help="nc 数据集路径（h5py 直读，支持中文路径）")
     ap.add_argument("--mask", default=None,
@@ -601,23 +743,55 @@ def main(argv=None):
                   if i0 < T}
 
         # 1) IVD 场（逐帧流式，避免 u/v 全量驻留）
-        print(f"计算 IVD 场 ({T}×{Y}×{X}, 5×5 邻域, 固体区置零) ...")
+        print(f"计算 standard IVD 场 ({T}×{Y}×{X}, 每帧全局 valid-fluid mean) ...")
         ivd = np.zeros((T, Y, X), dtype=np.float32)
+        valid_fluid = np.zeros((T, Y, X), dtype=bool)
+        invalid = np.zeros((T, Y, X), dtype=bool)
+        omega_bars = []
+        input_frame_identities = []
         for t in range(T):
-            ivd[t] = compute_ivd(f["u"][t][None], f["v"][t][None], xdim, ydim,
-                                 mask=mask2d).astype(np.float32)[0]
+            details = standard_ivd.compute_standard_ivd_details(
+                np.asarray(f["u"][t], dtype=np.float32),
+                np.asarray(f["v"][t], dtype=np.float32),
+                xdim,
+                ydim,
+                solid_mask=mask2d,
+            )
+            ivd[t] = details.ivd.astype(np.float32)
+            valid_fluid[t] = details.valid_fluid_mask
+            invalid[t] = details.invalid_mask
+            omega_bars.append(float(details.omega_bar))
+            input_frame_identities.append(details.metadata["input_identity"])
         np.save(out_dir / "ivd.npy", ivd)
+        np.save(out_dir / "valid_fluid_mask.npy", valid_fluid.astype(np.uint8))
+        np.save(out_dir / "invalid_mask.npy", invalid.astype(np.uint8))
         print(f"  IVD 场已保存: {out_dir / 'ivd.npy'} "
-              f"(max={ivd.max():.5g}, 固体区零={bool((ivd[:, mask2d] == 0).all())})")
+              f"(max={ivd.max():.5g}, 固体区零={bool((ivd[:, mask2d] == 0).all())}, "
+              f"valid/invalid mask 已保存)")
 
         # 2) 逐时间片 τ
-        taus = compute_tau(ivd, mask2d, slices, percentile=args.percentile)
+        taus = compute_tau(
+            ivd,
+            mask2d,
+            slices,
+            percentile=args.percentile,
+            valid_fluid_mask=valid_fluid,
+            invalid_mask=invalid,
+        )
         print("τ 值（逐时间片, " + f"{args.percentile:g} 分位):")
         for name, tau in taus.items():
             print(f"  {name}: {tau:.6g}")
 
         # 3) 标签场
-        lab = build_label_field(ivd, mask2d, taus, slices, min_area=args.min_area)
+        lab = build_label_field(
+            ivd,
+            mask2d,
+            taus,
+            slices,
+            min_area=args.min_area,
+            valid_fluid_mask=valid_fluid,
+            invalid_mask=invalid,
+        )
         np.save(out_dir / "label_field.npy", lab)
         print(f"  标签场已保存: {out_dir / 'label_field.npy'} "
               f"(正格占比={lab.mean():.4f})")
@@ -636,10 +810,74 @@ def main(argv=None):
         print(f"  正样本占比[global]: {frac_global['fraction']:.4f} "
               f"({frac_global['n_positive']}/{frac_global['n_patches']})")
 
+        spacing = {
+            "dx": float(xdim[1] - xdim[0]),
+            "dy": float(ydim[1] - ydim[0]),
+        }
+        ivd_provenance = {
+            "protocol_version": standard_ivd.PROTOCOL_VERSION,
+            "source_id": standard_ivd.SOURCE_ID,
+            "source_identity": standard_ivd.SOURCE_IDENTITY,
+            "artifact_identity": standard_ivd.SOURCE_IDENTITY["artifact_identity"],
+            "definition_id": standard_ivd.FORMULA_VERSION,
+            "formula_version": standard_ivd.FORMULA_VERSION,
+            "formula": standard_ivd.FORMULA,
+            "ivd_formula": standard_ivd.FORMULA,
+            "mean_scope": "declared_valid_fluid_support",
+            "mean_quantity": "signed omega",
+            "input_frame_identity_by_frame": input_frame_identities,
+            "spacing": spacing,
+            "grid_spacing": spacing,
+            "omega_bar_by_frame": omega_bars,
+            "valid_fluid_counts_by_frame": [
+                int(row.sum()) for row in valid_fluid
+            ],
+            "invalid_counts_by_frame": [
+                int(row.sum()) for row in invalid
+            ],
+            "valid_fluid_mask_semantics": (
+                "declared_valid_fluid_support intersect finite_omega and non_solid"
+            ),
+            "solid_mask_semantics": (
+                "solid cells are excluded from omega_bar and label support; "
+                "solid is not a valid negative"
+            ),
+            "invalid_mask_semantics": (
+                "non-finite omega, explicit invalid, or outside declared valid-fluid "
+                "support; excluded from omega_bar and label support"
+            ),
+            "storage_semantics": {
+                "solid": "zero_for_artifact_storage_only",
+                "invalid": "zero_for_artifact_storage_only",
+                "consumer_must_use_masks": True,
+            },
+            "provenance": {
+                "module": "standard_ivd",
+                "entry_point": "standard_ivd.compute_standard_ivd_details",
+                "implementation_version": standard_ivd.IMPLEMENTATION_VERSION,
+                "per_frame": True,
+                "difference_scheme": {
+                    "vorticity": "d(v)/d(x) - d(u)/d(y)",
+                    "interior": "second_order_centered",
+                    "boundary": "first_order_one_sided",
+                },
+                "source_identity": standard_ivd.SOURCE_IDENTITY,
+            },
+        }
         meta = {
             "source_nc": str(args.nc_path),
             "shape": [T, Y, X],
             "mask_source": args.mask if args.mask else "computed_from_speed(eps=1e-5)",
+            "ivd_source": "standard_ivd_shared_streaming",
+            "ivd_provenance": ivd_provenance,
+            "ivd_source_identity": standard_ivd.SOURCE_IDENTITY,
+            "ivd_definition_id": standard_ivd.FORMULA_VERSION,
+            "ivd_formula": standard_ivd.FORMULA,
+            "spacing": spacing,
+            "valid_fluid_mask_file": "valid_fluid_mask.npy",
+            "invalid_mask_file": "invalid_mask.npy",
+            "solid_mask_semantics": ivd_provenance["solid_mask_semantics"],
+            "invalid_mask_semantics": ivd_provenance["invalid_mask_semantics"],
             "percentile": float(args.percentile),
             "min_area": int(args.min_area),
             "taus": taus,
@@ -669,6 +907,8 @@ def main(argv=None):
                                  f"IVD + Q>0(cyan) + label>=τ(lime)")
                 plot_tau_sensitivity(ivd[t0f], mask2d, xdim, ydim,
                                      out_dir / f"tau_sensitivity_t{t0f}.png",
+                                     valid_fluid_mask=valid_fluid[t0f],
+                                     invalid_mask=invalid[t0f],
                                      title=f"t={tdim[t0f]:.2f}s frame={t0f} "
                                            f"tau sensitivity")
                 print(f"  目检图已保存: {out_dir / f'ivd_q_t{t0f}.png'} "

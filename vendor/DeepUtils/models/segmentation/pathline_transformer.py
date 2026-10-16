@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 from ..build import MODELS
 from torch import nn
 from .samplingLayers import *
@@ -101,12 +102,13 @@ class PosE_Initial(nn.Module):
 
 @MODELS.register_module()
 class PathlineTransformerV0(nn.Module):
-    def __init__(self, in_channels, PathlineGroups,KpathlinePerGroup, num_classes=1, num_encoder_layers=3,dmodel=252,dropout=0.1,k=16,**kwargs):
+    def __init__(self, in_channels, PathlineGroups,KpathlinePerGroup, num_classes=1, num_encoder_layers=3,dmodel=252,dropout=0.1,k=16,activation_checkpointing=False,**kwargs):
         super().__init__()
         self.input_dim = in_channels
         self.dim = dmodel
         self.knn_k=k #knn neighbor size
         self.pathlinePerGroup=KpathlinePerGroup
+        self.activation_checkpointing = activation_checkpointing
         
         self.keep_Groups = int(0.5* PathlineGroups)
         if  self.keep_Groups % 2 != 0:
@@ -177,6 +179,15 @@ class PathlineTransformerV0(nn.Module):
     #     return full_output    
     
     def forward(self, data):
+        """Return the original single-task score for every pathline start."""
+        return self.predict_features(self.encode_pathlines(data))
+
+    def encode_pathlines(self, data):
+        """Encode and propagate one original stochastic view to all starts.
+
+        The returned [B, K, dim] features are the original classifier input.
+        Sampling remains random in eval mode, as in the original forward.
+        """
         _,pathline_src=data
         
         tmp_sampled_pathline,temporal_indices=PathlineTemporalSamplingLayer(pathline_src,random=True)
@@ -196,7 +207,14 @@ class PathlineTransformerV0(nn.Module):
         x=torch.concat((pos_emb,feature),dim=-1)
         
         for layer in self.transformer_layers:
-            x = x + layer(x, pos,knn_idx)
+            # Sampling and KNN selection above run once per stochastic view.
+            # Recompute only the stateless KNN layer during student backward.
+            if self.activation_checkpointing and torch.is_grad_enabled():
+                update = checkpoint(layer, x, pos, knn_idx,
+                                    use_reentrant=False, preserve_rng_state=True)
+            else:
+                update = layer(x, pos, knn_idx)
+            x = x + update
         x = self.norm(x)
         x=x.reshape(B,L,sampleK,self.dim)
         #x shape [B,K,Dimodel]
@@ -206,9 +224,11 @@ class PathlineTransformerV0(nn.Module):
         # return  self.output(self.fc(x))
         full_features = self.propagate_features(pathline_src[:,0,:,:], sampled_pathline[:,0,:,:], x,pathline_mask)
      
-        # Apply final layers to get output for all pathlines
-        full_output = self.output(self.fc(full_features)).squeeze(-1)
-        return full_output
+        return full_features
+
+    def predict_features(self, full_features):
+        """Apply the unchanged original classifier and sigmoid."""
+        return self.output(self.fc(full_features)).squeeze(-1)
     
     
     

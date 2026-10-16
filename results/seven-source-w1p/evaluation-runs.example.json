@@ -1,0 +1,32 @@
+{
+  "probability_threshold": 0.1,
+  "threshold_rule": "Registered global calibration-only p=.1; no source/seed retuning",
+  "required_seeds": [
+    0,
+    1,
+    2
+  ],
+  "runs": [
+    {
+      "method": "W1-P",
+      "seed": 0,
+      "checkpoint": "results/seven-source-w1p/seed0/epoch_0100.pt",
+      "config": "config/mfc_mixed_w1p_seed0_batch64.json",
+      "evaluation_root": "outputs/seven-source-seed0"
+    },
+    {
+      "method": "W1-P",
+      "seed": 1,
+      "checkpoint": "results/seven-source-w1p/seed1/epoch_0100.pt",
+      "config": "config/mfc_mixed_w1p_seed0_batch64.json",
+      "evaluation_root": "outputs/seven-source-seed1"
+    },
+    {
+      "method": "W1-P",
+      "seed": 2,
+      "checkpoint": "results/seven-source-w1p/seed2/epoch_0100.pt",
+      "config": "config/mfc_mixed_w1p_seed0_batch64.json",
+      "evaluation_root": "outputs/seven-source-seed2"
+    }
+  ]
+}

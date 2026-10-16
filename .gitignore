@@ -18,7 +18,8 @@ memmap/
 # 训练与评估产物
 checkpoints/
 runs/
-results/
+results/*
+!results/seven-source-w1p/
 outputs/
 
 # 兼容打包脚本的临时产物（不进 git）
@@ -29,3 +30,11 @@ kaggle_dataset_a*.zip
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local experiments and generated intermediates
+.scratch/
+.pytest_cache/
+*.log
+*.tar.gz
+*.pt
+!results/seven-source-w1p/seed*/epoch_0100.pt

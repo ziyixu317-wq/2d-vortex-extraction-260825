@@ -1,30 +1,33 @@
 """Haller-IVD 单帧 physics-anchor 提取器（02 票）。
 
-本模块只负责单帧 ``u/v + geometry mask`` 的物理候选和三态 artifact：
+本模块只负责单帧 ``u/v + geometry mask`` 的物理候选和 candidate artifact：
 
 ``速度场 → 涡量 → standard IVD → fluid 局部峰 → 闭合等值线 →
-几何筛选 → positive/unknown/negative``。
+几何筛选 → sparse positive/unknown``。
 
 Haller 原始文献在当前工程中只有 Zotero 候选条目 ``L2PX3NQX``，全文和
 算法细节尚未核实。因此本文件中的参数是已确认的**工程参数**，而不是
 canonical paper 参数；每个 artifact 都会记录这一证据状态、完整参数、
 输入 hash 和失败计数。
 
-三态编码固定为：
+artifact state 保留三态编码以兼容既有文件格式，但当前 Haller physics
+source 只产生 sparse positive evidence：
 
 * ``POSITIVE = 1``：闭合轮廓内部且远离 unknown band；
-* ``NEGATIVE = 0``：闭合轮廓/边界带外且 IVD 不高于本帧 fluid p60；
-* ``UNKNOWN = -1``：边界带、未决区域、solid 或失败帧。
+* ``NEGATIVE = 0``：保留的历史编码；新 Haller source 禁止生成；
+* ``UNKNOWN = -1``：边界带、未决区域、solid、invalid 或失败帧。
 
 ``haller_gt.npy`` 与 ``anchor_state.npy`` 都保留上述三态编码；前者是
-下游读取时的明确 GT 名称，后者是训练 anchor 名称。test GT 的读取必须
-通过 ``load_haller_artifact(..., expected_source=SOURCE_TEST)`` 显式声明，
-防止默认 loader 把 test 标签带入训练。
+历史下游名称，不能直接当作 dense segmentation GT，后者是 sparse physics
+anchor 名称。test artifact 的读取必须通过
+``load_haller_artifact(..., expected_source=SOURCE_TEST)`` 显式声明，防止
+默认 loader 把 test 标签带入训练。
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -37,6 +40,7 @@ from typing import Any, Mapping
 
 import numpy as np
 
+import standard_ivd as _standard_ivd
 import weak_labels
 
 
@@ -47,7 +51,21 @@ ALGORITHM_VERSION = "haller-anchor-v1.0"
 SOURCE_TRAIN = "haller_anchor_train"
 SOURCE_CALIBRATION = "haller_gt_calibration"
 SOURCE_TEST = "haller_gt_test"
-VALID_SOURCES = frozenset({SOURCE_TRAIN, SOURCE_CALIBRATION, SOURCE_TEST})
+SOURCE_DEVELOPMENT_AUDIT = "haller_audit_development"
+VALID_SOURCES = frozenset({
+    SOURCE_TRAIN,
+    SOURCE_CALIBRATION,
+    SOURCE_TEST,
+    SOURCE_DEVELOPMENT_AUDIT,
+})
+
+# The legacy ``anchor_*`` files remain available for W1-H compatibility.  The
+# evidence tracer below adds a first-class, candidate-only bundle around the
+# same extractor without silently upgrading it to a trusted Haller version.
+EVIDENCE_FORMAT_VERSION = "haller-evidence-r1-v2"
+ARTIFACT_STATE_CANDIDATE = "candidate"
+ARTIFACT_STATE_AUDITED = "audited"
+ARTIFACT_STATE_FROZEN = "frozen"
 
 POSITIVE = np.int8(1)
 NEGATIVE = np.int8(0)
@@ -70,6 +88,29 @@ _ROI_INITIAL_RADIUS_CELLS = 8
 BACKEND_NUMPY = "numpy"
 BACKEND_FAST_HALLER = "fast_haller"
 BACKEND_NUMBACS = "numbacs"
+# The native-return remediation is a versioned engineering contract selected
+# from the controlled analytic panel.  It is not a canonical paper parameter.
+NUMBACS_FORMAL_NLEVS = 3
+NUMBACS_FORMAL_PARAMETER_VERSION = "ticket05a-native-remediation-nlevs3-v1"
+NUMBACS_BACKEND_VERSION = "numbacs-0.2.0+c067f542543f+formal-nlevs3"
+# Ticket 04 uses a separately identified native NumbaCS execution contract.
+# Keep the qualified nlevs=3 contract above intact: changing it in place would
+# make historical qualification artifacts indistinguishable from this run.
+NUMBACS_TICKET04_NLEVS = 32
+NUMBACS_TICKET04_PARAMETER_VERSION = "ticket04-numbacs-nlevs32-v1"
+NUMBACS_TICKET04_BACKEND_VERSION = (
+    "numbacs-0.2.0+c067f542543f+ticket04-nlevs32"
+)
+_NUMBACS_CONTRACTS = {
+    NUMBACS_FORMAL_NLEVS: (
+        NUMBACS_FORMAL_PARAMETER_VERSION,
+        NUMBACS_BACKEND_VERSION,
+    ),
+    NUMBACS_TICKET04_NLEVS: (
+        NUMBACS_TICKET04_PARAMETER_VERSION,
+        NUMBACS_TICKET04_BACKEND_VERSION,
+    ),
+}
 # Ticket 09 deliberately exposes only the CPU Haller implementation.  A CUDA
 # implementation belongs to a separate ticket and must not be reachable from
 # this artifact seam by an implicit fallback or a public backend selector.
@@ -148,16 +189,7 @@ def grid_points_in_poly(shape: tuple[int, int], points: Any, *args: Any, **kwarg
     return dependencies[4](shape, points, *args, **kwargs)
 
 
-@dataclass(frozen=True)
-class _StandardIVDDetails:
-    """standard IVD 的内部计算结果，避免重复计算涡量和 fluid mean。"""
-
-    omega: np.ndarray
-    ivd: np.ndarray
-    fluid_mean: float
-    solid_mask: np.ndarray
-    dx: float
-    dy: float
+_StandardIVDDetails = _standard_ivd.StandardIVDDetails
 
 
 @dataclass(frozen=True)
@@ -201,7 +233,7 @@ def _resolve_backend(backend: str, device: Any = None) -> _BackendDetails:
             else (
                 "fast_haller-contourpy-v1"
                 if resolved == BACKEND_FAST_HALLER
-                else "numbacs-0.2.0+c067f542543f"
+                else NUMBACS_BACKEND_VERSION
             )
         ),
         compute_dtype="float64",
@@ -251,13 +283,16 @@ def _validate_coords(xdim: Any, ydim: Any, shape: tuple[int, int]) -> tuple[np.n
 
 
 def _coerce_frame(u: Any, v: Any) -> tuple[np.ndarray, np.ndarray]:
-    """把输入限制为同形状、有限的二维速度单帧。"""
+    """把输入限制为同形状二维速度单帧。
+
+    Non-finite field values are handled by the shared standard-IVD source so
+    they can be recorded as invalid rather than being confused with a failed
+    Haller extraction before the source has computed its support masks.
+    """
     u2 = np.asarray(u, dtype=np.float64)
     v2 = np.asarray(v, dtype=np.float64)
     if u2.ndim != 2 or v2.ndim != 2 or u2.shape != v2.shape:
         raise ValueError(f"u/v 必须是同形状二维单帧，实际 {u2.shape}/{v2.shape}")
-    if not np.all(np.isfinite(u2)) or not np.all(np.isfinite(v2)):
-        raise ValueError("u/v 必须全部有限")
     return u2, v2
 
 
@@ -303,6 +338,8 @@ def _artifact_array_hashes(
     standard_ivd: Any,
     omega: Any,
     solid_mask: Any = None,
+    valid_fluid_mask: Any = None,
+    invalid_mask: Any = None,
 ) -> dict[str, str]:
     """Hash the exact dtypes written to a Haller artifact.
 
@@ -319,6 +356,10 @@ def _artifact_array_hashes(
     }
     if solid_mask is not None:
         arrays["solid_mask"] = np.asarray(solid_mask, dtype=np.uint8)
+    if valid_fluid_mask is not None:
+        arrays["valid_fluid_mask"] = np.asarray(valid_fluid_mask, dtype=np.uint8)
+    if invalid_mask is not None:
+        arrays["invalid_mask"] = np.asarray(invalid_mask, dtype=np.uint8)
     return {name: _hash_array(array) for name, array in arrays.items()}
 
 
@@ -333,6 +374,33 @@ def _validate_source(source: str) -> str:
         allowed = ", ".join(sorted(VALID_SOURCES))
         raise ValueError(f"未知 Haller artifact source={source!r}；必须是 {allowed}")
     return source
+
+
+def _resolve_numbacs_contract(
+    nlevs: int | None,
+    parameter_version: str | None,
+) -> tuple[int, str, str]:
+    """Resolve one explicitly versioned native NumbaCS level contract."""
+    if nlevs is None:
+        resolved_nlevs = NUMBACS_FORMAL_NLEVS
+    else:
+        try:
+            resolved_nlevs = int(nlevs)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("numbacs_nlevs 必须是整数") from exc
+    contract = _NUMBACS_CONTRACTS.get(resolved_nlevs)
+    if contract is None:
+        allowed = ", ".join(str(value) for value in sorted(_NUMBACS_CONTRACTS))
+        raise ValueError(
+            f"当前 NumbaCS 只允许已版本化的 nlevs={allowed}；"
+            f"实际收到 {resolved_nlevs}"
+        )
+    expected_version, backend_version = contract
+    if parameter_version is not None and str(parameter_version) != expected_version:
+        raise ValueError(
+            "numbacs_parameter_version 与 nlevs 的版本化 contract 不匹配"
+        )
+    return resolved_nlevs, expected_version, backend_version
 
 
 def _resolve_parameters(
@@ -356,7 +424,7 @@ def _resolve_parameters(
         "contour_search": "all_frozen_levels_outermost_selection",
         "outermost": "maximum_physical_area_per_local_peak",
         "solid_policy": "solid_cells_are_unknown_and_never_known_anchor",
-        "negative_rule": "outside_contour_and_band_and_ivd_le_frame_fluid_p60",
+        "negative_rule": "disabled_sparse_positive_anchor",
         "failure_fallback_train": "fluid_unknown",
         "failure_fallback_calibration_test": "invalid_frame",
     }
@@ -402,29 +470,56 @@ def _compute_standard_ivd_details(
     *,
     backend: str = BACKEND_NUMPY,
     device: Any = None,
+    valid_fluid_mask: Any = None,
+    invalid_mask: Any = None,
+    input_identity: Any = None,
 ) -> _StandardIVDDetails:
-    """计算 standard IVD 的数组和元数据（内部共享给主入口）。"""
+    """计算 shared standard IVD 的数组和元数据（内部共享给主入口）。"""
     u2, v2 = _coerce_frame(u, v)
     x, y, dx, dy = _validate_coords(xdim, ydim, u2.shape)
     solid = _coerce_solid_mask(mask, u2.shape)
-    fluid = ~solid
-    if not np.any(fluid):
-        raise ValueError("geometry mask 将整帧标为 solid，无法计算 fluid vorticity mean")
-
     backend_details = _resolve_backend(backend, device)
-    # 与既有弱标签保持同一个中心/边界差分口径；mean 只在 fluid 上统计。
-    # 这是 ticket 09 唯一可用的 Haller 数值路径；CUDA backend 不在本票实现。
-    omega = np.asarray(weak_labels.vorticity(u2, v2, x, y), dtype=np.float64)
-    if not np.all(np.isfinite(omega)):
-        raise ValueError("涡量计算结果包含非有限值")
-    fluid_mean = float(omega[fluid].mean())
-    ivd = np.abs(omega - fluid_mean)
-    # solid 上的数值不参与任何候选、分位或 contour；显式置零避免污染 artifact。
-    omega = omega.copy()
-    omega[solid] = 0.0
-    ivd = ivd.astype(np.float64, copy=False)
-    ivd[solid] = 0.0
-    return _StandardIVDDetails(omega, ivd, fluid_mean, solid, dx, dy)
+    # Backend resolution remains an explicit Haller contour contract; all
+    # backends consume this same standard-IVD numerical source.
+    del backend_details
+    return _standard_ivd.compute_standard_ivd_details(
+        u2,
+        v2,
+        x,
+        y,
+        solid_mask=solid,
+        valid_fluid_mask=valid_fluid_mask,
+        invalid_mask=invalid_mask,
+        input_identity=input_identity,
+    )
+
+
+def compute_standard_ivd_details(
+    u: Any,
+    v: Any,
+    xdim: Any,
+    ydim: Any,
+    mask: Any = None,
+    *,
+    backend: str = BACKEND_NUMPY,
+    device: Any = None,
+    valid_fluid_mask: Any = None,
+    invalid_mask: Any = None,
+    input_identity: Any = None,
+) -> _StandardIVDDetails:
+    """Public Haller-side view of the shared standard-IVD result."""
+    return _compute_standard_ivd_details(
+        u,
+        v,
+        xdim,
+        ydim,
+        mask,
+        backend=backend,
+        device=device,
+        valid_fluid_mask=valid_fluid_mask,
+        invalid_mask=invalid_mask,
+        input_identity=input_identity,
+    )
 
 
 def compute_standard_ivd(
@@ -436,6 +531,10 @@ def compute_standard_ivd(
     *,
     backend: str = BACKEND_NUMPY,
     device: Any = None,
+    valid_fluid_mask: Any = None,
+    invalid_mask: Any = None,
+    input_identity: Any = None,
+    return_details: bool = False,
 ) -> np.ndarray:
     """返回二维 standard IVD：``abs(omega - mean_fluid(omega))``。
 
@@ -443,7 +542,7 @@ def compute_standard_ivd(
     以保持与现有 ``weak_labels.compute_ivd`` 的调用习惯一致；主提取入口
     还会在 metadata 中记录 fluid mean、格距和输入 hash。
     """
-    return _compute_standard_ivd_details(
+    details = compute_standard_ivd_details(
         u,
         v,
         xdim,
@@ -451,7 +550,11 @@ def compute_standard_ivd(
         mask,
         backend=backend,
         device=device,
-    ).ivd
+        valid_fluid_mask=valid_fluid_mask,
+        invalid_mask=invalid_mask,
+        input_identity=input_identity,
+    )
+    return details if return_details else details.ivd
 
 
 standard_ivd = compute_standard_ivd
@@ -1430,6 +1533,8 @@ def _select_contours(
     fast_global_level_count: int = 64,
     fast_refinement_iterations: int = 7,
     fast_refinement_halo_cells: int = 2,
+    numbacs_nlevs: int = NUMBACS_FORMAL_NLEVS,
+    numbacs_parameter_version: str = NUMBACS_FORMAL_PARAMETER_VERSION,
     return_evaluation: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | tuple[
     list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]
@@ -1491,6 +1596,8 @@ def _select_contours(
             params,
             dx,
             dy,
+            nlevs=numbacs_nlevs,
+            parameter_version=numbacs_parameter_version,
             return_evaluation=return_evaluation,
         )
     if contour_mode == CONTOUR_MODE_NUMBACS:
@@ -1648,18 +1755,35 @@ def _rasterize_union(
     return interior_union, band_union
 
 
-def _coverage(state: np.ndarray, solid: np.ndarray) -> dict[str, Any]:
-    """按 fluid 分母计算三态 coverage，同时单列 solid 数。"""
+def _coverage(
+    state: np.ndarray,
+    solid: np.ndarray,
+    invalid: np.ndarray | None = None,
+    valid_fluid: np.ndarray | None = None,
+) -> dict[str, Any]:
+    """按 valid-fluid 分母计算三态 coverage，并分列 solid/invalid。"""
+    solid = np.asarray(solid, dtype=bool)
     fluid = ~solid
+    if invalid is None:
+        invalid_mask = np.zeros_like(solid, dtype=bool)
+    else:
+        invalid_mask = np.asarray(invalid, dtype=bool) & fluid
+    if valid_fluid is None:
+        valid_support = fluid & ~invalid_mask
+    else:
+        valid_support = np.asarray(valid_fluid, dtype=bool) & fluid & ~invalid_mask
     fluid_cells = int(fluid.sum())
-    pos = int(np.count_nonzero((state == POSITIVE) & fluid))
-    neg = int(np.count_nonzero((state == NEGATIVE) & fluid))
-    unk = int(np.count_nonzero((state == UNKNOWN) & fluid))
+    valid_fluid_cells = int(valid_support.sum())
+    pos = int(np.count_nonzero((state == POSITIVE) & valid_support))
+    neg = int(np.count_nonzero((state == NEGATIVE) & valid_support))
+    unk = int(np.count_nonzero((state == UNKNOWN) & valid_support))
     total_unknown = int(np.count_nonzero(state == UNKNOWN))
-    denom = float(fluid_cells) if fluid_cells else 1.0
+    denom = float(valid_fluid_cells) if valid_fluid_cells else 1.0
     return {
         "solid_cells": int(solid.sum()),
         "fluid_cells": fluid_cells,
+        "valid_fluid_cells": valid_fluid_cells,
+        "invalid_cells": int(invalid_mask.sum()),
         "positive_cells": pos,
         "negative_cells": neg,
         "unknown_cells": unk,
@@ -1697,6 +1821,10 @@ def extract_haller_anchors(
     fast_global_level_count: int = 64,
     fast_refinement_iterations: int = 7,
     fast_refinement_halo_cells: int = 2,
+    numbacs_nlevs: int | None = None,
+    numbacs_parameter_version: str | None = None,
+    valid_fluid_mask: Any = None,
+    invalid_mask: Any = None,
 ) -> dict[str, Any]:
     """从一帧速度场生成 standard IVD、闭合 contour 和三态 Haller artifact。
 
@@ -1723,6 +1851,15 @@ def extract_haller_anchors(
     contour_mode = _contour_mode_for_backend(
         backend_details.resolved, contour_mode
     )
+    resolved_numbacs_nlevs = NUMBACS_FORMAL_NLEVS
+    resolved_numbacs_parameter_version = NUMBACS_FORMAL_PARAMETER_VERSION
+    resolved_numbacs_backend_version = NUMBACS_BACKEND_VERSION
+    if backend_details.resolved != BACKEND_NUMBACS and (
+        numbacs_nlevs is not None or numbacs_parameter_version is not None
+    ):
+        raise ValueError(
+            "numbacs_nlevs/numbacs_parameter_version 只能与 backend='numbacs' 一起使用"
+        )
     if backend_details.resolved == BACKEND_FAST_HALLER:
         try:
             fast_global_level_count = int(fast_global_level_count)
@@ -1750,10 +1887,15 @@ def extract_haller_anchors(
         from numbacs_haller import (
             UPSTREAM_DEFAULT_END_LEVEL,
             UPSTREAM_DEFAULT_MIN_VAL,
-            UPSTREAM_DEFAULT_NLEVS,
             UPSTREAM_DEFAULT_START_LEVEL,
             runtime_mode as numbacs_runtime_mode,
         )
+
+        (
+            resolved_numbacs_nlevs,
+            resolved_numbacs_parameter_version,
+            resolved_numbacs_backend_version,
+        ) = _resolve_numbacs_contract(numbacs_nlevs, numbacs_parameter_version)
 
         params = dict(params)
         params.update({
@@ -1761,22 +1903,26 @@ def extract_haller_anchors(
             "numbacs_upstream_version": "0.2.0",
             "numbacs_upstream_commit": "c067f542543f5dd4ae3dc45fc506213e8d98b845",
             "numbacs_runtime_mode": numbacs_runtime_mode(),
-            # These are the official defaults used by the formal native call.
-            # Keep them backend-scoped because the generic Haller reference
-            # parameters above intentionally describe a different 32-level
-            # engineering extractor.
-            "numbacs_contour_level_count": UPSTREAM_DEFAULT_NLEVS,
-            "numbacs_nlevs_passed_explicitly": False,
+            "numbacs_contour_level_count": resolved_numbacs_nlevs,
+            "numbacs_nlevs": resolved_numbacs_nlevs,
+            "numbacs_parameter_version": resolved_numbacs_parameter_version,
+            # The qualified nlevs=3 contract remains recorded as the
+            # historical formal baseline; the current execution contract is
+            # identified separately above.
+            "numbacs_formal_nlevs": NUMBACS_FORMAL_NLEVS,
+            "numbacs_formal_parameter_version": NUMBACS_FORMAL_PARAMETER_VERSION,
+            "numbacs_backend_version": resolved_numbacs_backend_version,
+            "numbacs_nlevs_passed_explicitly": True,
             "numbacs_default_min_val": UPSTREAM_DEFAULT_MIN_VAL,
             "numbacs_default_start_level": UPSTREAM_DEFAULT_START_LEVEL,
             "numbacs_default_end_level": UPSTREAM_DEFAULT_END_LEVEL,
             "numbacs_explicit_kwargs": [
+                "nlevs",
                 "convexity_deficiency",
                 "min_len",
             ],
             "numbacs_omitted_kwargs": [
                 "min_val",
-                "nlevs",
                 "start_level",
                 "end_level",
             ],
@@ -1795,20 +1941,27 @@ def extract_haller_anchors(
         mask,
         backend=backend_details.resolved,
         device=backend_details.device,
+        valid_fluid_mask=valid_fluid_mask,
+        invalid_mask=invalid_mask,
     )
     solid = details.solid_mask
     fluid = ~solid
+    valid_fluid = np.asarray(details.valid_fluid_mask, dtype=bool)
+    invalid = np.asarray(details.invalid_mask, dtype=bool)
+    # Haller geometry must not inspect cells outside the valid source support.
+    # They remain explicit invalid/unknown cells in the returned artifact.
+    excluded = ~valid_fluid
     x = np.asarray(xdim, dtype=np.float64)
     y = np.asarray(ydim, dtype=np.float64)
     peaks = find_local_maxima(
         details.ivd,
-        solid,
+        excluded,
         backend=backend_details.resolved,
         device=backend_details.device,
     )
     contours, contour_diagnostics, contour_evaluation = _select_contours(
         details.ivd,
-        solid,
+        excluded,
         x,
         y,
         peaks,
@@ -1821,6 +1974,8 @@ def extract_haller_anchors(
         fast_global_level_count=fast_global_level_count,
         fast_refinement_iterations=fast_refinement_iterations,
         fast_refinement_halo_cells=fast_refinement_halo_cells,
+        numbacs_nlevs=resolved_numbacs_nlevs,
+        numbacs_parameter_version=resolved_numbacs_parameter_version,
         return_evaluation=True,
     )
 
@@ -1834,7 +1989,6 @@ def extract_haller_anchors(
         state, confidence = _failure_state(details.ivd.shape)
         frame_valid = source == SOURCE_TRAIN
         failure_count = 1
-        frame_p60 = float(np.percentile(details.ivd[fluid], float(params["negative_percentile"])))
         interior_union = np.zeros(details.ivd.shape, dtype=bool)
         band_union = np.zeros(details.ivd.shape, dtype=bool)
     else:
@@ -1842,14 +1996,12 @@ def extract_haller_anchors(
         interior_union, band_union = _rasterize_union(
             contours, details.ivd.shape, details.dx, details.dy, unknown_band_width
         )
-        frame_p60 = float(np.percentile(details.ivd[fluid], float(params["negative_percentile"])))
         state = np.full(details.ivd.shape, UNKNOWN, dtype=np.int8)
-        outside_known = fluid & ~interior_union & ~band_union
-        state[outside_known & (details.ivd <= frame_p60)] = NEGATIVE
-        state[fluid & interior_union & ~band_union] = POSITIVE
-        # Unknown band has precedence over positive/negative. Solid was unknown
-        # from initialization and is never written by either known assignment.
-        state[solid] = UNKNOWN
+        state[valid_fluid & interior_union & ~band_union] = POSITIVE
+        # Haller is sparse positive physics evidence.  There is deliberately no
+        # dense negative assignment; the rest of fluid, solid, and invalid cells
+        # remain unknown and cannot be consumed as dense segmentation GT.
+        state[solid | invalid] = UNKNOWN
         confidence = np.where(state == UNKNOWN, 0.0, 1.0).astype(np.float32)
         frame_valid = True
         failure_count = 0
@@ -1867,6 +2019,13 @@ def extract_haller_anchors(
             "negative": int(NEGATIVE),
             "unknown": int(UNKNOWN),
         },
+        "anchor_semantics": "sparse_positive_physics_evidence_only",
+        "dense_negative_generated": False,
+        "dense_segmentation_gt": False,
+        "negative_state_policy": (
+            "legacy encoding retained for compatibility; new Haller source "
+            "never emits negative"
+        ),
         "parameters": params,
         "parameter_hash": _json_hash(params),
         "backend_requested": backend_details.requested,
@@ -1874,7 +2033,11 @@ def extract_haller_anchors(
         "backend": backend_details.resolved,
         "device": backend_details.device,
         "cuda_used": backend_details.cuda_used,
-        "backend_version": backend_details.backend_version,
+        "backend_version": (
+            resolved_numbacs_backend_version
+            if backend_details.resolved == BACKEND_NUMBACS
+            else backend_details.backend_version
+        ),
         "compute_dtype": backend_details.compute_dtype,
         "backend_fallback_reason": backend_details.fallback_reason,
         "contour_backend": (
@@ -1909,17 +2072,29 @@ def extract_haller_anchors(
             "max": max(details.dx, details.dy),
         },
         "shape": [int(vv) for vv in details.ivd.shape],
-        "fluid_vorticity_mean": details.fluid_mean,
-        "ivd_formula": "abs(omega - mean_fluid(omega))",
-        "mean_scope": "entire_fluid_spatial_domain",
-        "frame_fluid_p60": frame_p60,
-        "input_hash": _hash_named_arrays({
-            "u": np.asarray(u, dtype=np.float64),
-            "v": np.asarray(v, dtype=np.float64),
-            "xdim": x,
-            "ydim": y,
-        }),
+        "protocol_version": details.metadata["protocol_version"],
+        "source_id": details.metadata["source_id"],
+        "ivd_source_identity": copy.deepcopy(details.metadata["source_identity"]),
+        "artifact_identity": copy.deepcopy(details.metadata["artifact_identity"]),
+        "ivd_definition_id": details.metadata["definition_id"],
+        "ivd_formula_version": details.metadata["formula_version"],
+        "omega_bar": details.omega_bar,
+        "fluid_vorticity_mean": details.omega_bar,
+        "ivd_formula": details.metadata["formula"],
+        "mean_scope": details.metadata["mean_scope"],
+        "valid_fluid_mask_semantics": details.metadata["valid_fluid_mask_semantics"],
+        "solid_mask_semantics": details.metadata["solid_mask_semantics"],
+        "invalid_mask_semantics": details.metadata["invalid_mask_semantics"],
+        "ivd_storage_semantics": copy.deepcopy(details.metadata["storage_semantics"]),
+        "ivd_provenance": copy.deepcopy(details.metadata["provenance"]),
+        "valid_fluid_cells": int(valid_fluid.sum()),
+        "invalid_cells": int(invalid.sum()),
+        "frame_fluid_p60": None,
+        "input_field_identity": details.metadata["input_identity"],
+        "input_hash": details.metadata["input_identity"],
         "mask_hash": _hash_array(solid),
+        "valid_fluid_mask_hash": _hash_array(valid_fluid),
+        "invalid_mask_hash": _hash_array(invalid),
         "solid_policy": "solid cells are always unknown; no positive or negative anchor",
         "frame_valid": bool(frame_valid),
         "valid": bool(not failed),
@@ -1935,6 +2110,8 @@ def extract_haller_anchors(
             details.ivd,
             details.omega,
             solid,
+            valid_fluid,
+            invalid,
         ),
         "n_peaks": int(len(peaks)),
         "n_selected_contours": int(len(contours)),
@@ -1949,7 +2126,7 @@ def extract_haller_anchors(
         )),
         "selected_contours": contours,
         "contour_diagnostics": contour_diagnostics,
-        "coverage": _coverage(state, solid),
+        "coverage": _coverage(state, solid, invalid, valid_fluid),
     }
 
     result = {
@@ -1958,6 +2135,8 @@ def extract_haller_anchors(
         "ivd": details.ivd.astype(np.float64, copy=True),
         "solid_mask": solid.astype(bool, copy=True),
         "fluid_mask": fluid.astype(bool, copy=True),
+        "valid_fluid_mask": valid_fluid.astype(bool, copy=True),
+        "invalid_mask": invalid.astype(bool, copy=True),
         "peaks": peaks,
         "contours": contours,
         "interior_mask": interior_union,
@@ -2057,6 +2236,20 @@ def save_haller_artifact(
         raise ValueError("Haller result 缺少 metadata")
     metadata = dict(result["metadata"])
     source = _validate_source(str(metadata.get("source", "")))
+    if metadata.get("ivd_source_identity") != _standard_ivd.SOURCE_IDENTITY:
+        raise ValueError(
+            "Haller artifact 必须声明当前 standard IVD source identity；"
+            "历史 IVD artifact 不能作为新协议 formal source"
+        )
+    if metadata.get("anchor_semantics") != "sparse_positive_physics_evidence_only":
+        raise ValueError(
+            "Haller artifact 必须声明 sparse positive physics evidence 语义；"
+            "历史或 dense anchor artifact 不能作为新协议 formal source"
+        )
+    if metadata.get("dense_negative_generated") is not False:
+        raise ValueError(
+            "Haller artifact 不得声明或生成 dense negative evidence"
+        )
     shape_value = metadata.get("shape")
     if not isinstance(shape_value, (list, tuple)) or len(shape_value) != 2:
         raise ValueError("Haller metadata 缺少二维 shape")
@@ -2068,13 +2261,51 @@ def save_haller_artifact(
     omega = _result_array(result, "omega", np.float32, shape)
     if not np.array_equal(state, gt):
         raise ValueError("haller_gt 与 anchor_state 不一致，拒绝保存歧义 artifact")
+    if np.any(state == NEGATIVE):
+        raise ValueError(
+            "Haller sparse anchor 不允许保存 NEGATIVE；其余单元必须保持 UNKNOWN"
+        )
     if np.any(~np.isfinite(confidence)) or np.any(~np.isfinite(ivd)) or np.any(~np.isfinite(omega)):
         raise ValueError("Haller artifact 数组包含非有限值")
     solid_array = None
     if "solid_mask" in result:
         solid_array = _result_array(result, "solid_mask", np.uint8, shape)
+    valid_fluid_array = None
+    if "valid_fluid_mask" in result:
+        valid_fluid_array = _result_array(result, "valid_fluid_mask", np.uint8, shape)
+    invalid_array = None
+    if "invalid_mask" in result:
+        invalid_array = _result_array(result, "invalid_mask", np.uint8, shape)
+    if solid_array is None or valid_fluid_array is None or invalid_array is None:
+        raise ValueError(
+            "当前 Haller standard IVD artifact 必须同时保存 solid_mask、"
+            "valid_fluid_mask 和 invalid_mask"
+        )
+    for name, array in (
+        ("solid_mask", solid_array),
+        ("valid_fluid_mask", valid_fluid_array),
+        ("invalid_mask", invalid_array),
+    ):
+        if array is not None and not np.all(np.isin(array, [0, 1])):
+            raise ValueError(f"Haller artifact {name} 必须是 0/1")
+    if solid_array is not None and valid_fluid_array is not None:
+        if np.any(solid_array & valid_fluid_array):
+            raise ValueError("solid_mask 与 valid_fluid_mask 不能重叠")
+    if solid_array is not None and invalid_array is not None:
+        if np.any(solid_array & invalid_array):
+            raise ValueError("solid_mask 与 invalid_mask 不能重叠")
+    if valid_fluid_array is not None and invalid_array is not None:
+        if np.any(valid_fluid_array & invalid_array):
+            raise ValueError("valid_fluid_mask 与 invalid_mask 不能重叠")
     artifact_array_hashes = _artifact_array_hashes(
-        gt, state, confidence, ivd, omega, solid_array
+        gt,
+        state,
+        confidence,
+        ivd,
+        omega,
+        solid_array,
+        valid_fluid_array,
+        invalid_array,
     )
     declared_array_hashes = metadata.get("artifact_array_hashes")
     if declared_array_hashes is not None and dict(declared_array_hashes) != artifact_array_hashes:
@@ -2111,7 +2342,8 @@ def save_haller_artifact(
     else:
         known_files = [out / name for name in (
             "haller_gt.npy", "anchor_state.npy", "anchor_confidence.npy",
-            "standard_ivd.npy", "omega.npy",
+            "standard_ivd.npy", "omega.npy", "solid_mask.npy",
+            "valid_fluid_mask.npy", "invalid_mask.npy",
         )]
         if any(path.exists() for path in known_files) and not overwrite:
             raise ValueError("目标目录已有 Haller 数组但缺少 metadata，拒绝盲目覆盖")
@@ -2127,6 +2359,10 @@ def save_haller_artifact(
     elif (out / "solid_mask.npy").exists():
         (out / "solid_mask.npy").unlink()
         _fsync_directory(out)
+    if valid_fluid_array is not None:
+        _atomic_save_npy(out / "valid_fluid_mask.npy", valid_fluid_array)
+    if invalid_array is not None:
+        _atomic_save_npy(out / "invalid_mask.npy", invalid_array)
     # Metadata is published last.  A crash leaves either the old complete
     # metadata or a recoverable partial directory; the resume loader validates
     # hashes and recomputes before accepting it.
@@ -2138,6 +2374,12 @@ def save_haller_artifact(
         "standard_ivd": str(out / "standard_ivd.npy"),
         "omega": str(out / "omega.npy"),
         "metadata": str(meta_path),
+        **({"solid_mask": str(out / "solid_mask.npy")}
+           if solid_array is not None else {}),
+        **({"valid_fluid_mask": str(out / "valid_fluid_mask.npy")}
+           if valid_fluid_array is not None else {}),
+        **({"invalid_mask": str(out / "invalid_mask.npy")}
+           if invalid_array is not None else {}),
     }
 
 
@@ -2167,6 +2409,17 @@ def load_haller_artifact(
     if not isinstance(shape_value, (list, tuple)) or len(shape_value) != 2:
         raise ValueError("Haller artifact metadata 缺少二维 shape")
     shape = (int(shape_value[0]), int(shape_value[1]))
+    if metadata.get("ivd_source_identity") != _standard_ivd.SOURCE_IDENTITY:
+        raise ValueError(
+            "Haller artifact 的 standard IVD source identity 缺失或不匹配；"
+            "历史 IVD artifact 不能作为新协议 formal source"
+        )
+    if metadata.get("anchor_semantics") != "sparse_positive_physics_evidence_only":
+        raise ValueError(
+            "Haller artifact anchor_semantics 缺失或不是 sparse positive evidence"
+        )
+    if metadata.get("dense_negative_generated") is not False:
+        raise ValueError("Haller artifact 不允许 dense negative evidence")
     arrays = {
         "haller_gt": np.load(out / "haller_gt.npy", allow_pickle=False),
         "anchor_state": np.load(out / "anchor_state.npy", allow_pickle=False),
@@ -2192,6 +2445,11 @@ def load_haller_artifact(
         raise ValueError("artifact haller_gt 与 anchor_state 不一致")
     if not np.all(np.isin(arrays["anchor_state"], [UNKNOWN, NEGATIVE, POSITIVE])):
         raise ValueError("artifact anchor_state 含有未知三态编码")
+    if np.any(arrays["anchor_state"] == NEGATIVE):
+        raise ValueError(
+            "Haller sparse anchor artifact 不允许 NEGATIVE state；"
+            "历史 dense-negative artifact 不能作为新协议 formal source"
+        )
     if (np.any(~np.isfinite(arrays["anchor_confidence"]))
             or np.any(~np.isfinite(arrays["standard_ivd"]))
             or np.any(~np.isfinite(arrays["omega"]))):
@@ -2201,17 +2459,19 @@ def load_haller_artifact(
         raise ValueError("Haller metadata 缺少 parameters object")
     if metadata.get("parameter_hash") != _json_hash(parameters):
         raise ValueError("Haller metadata parameter_hash 校验失败")
-    expected_array_hashes = metadata.get("artifact_array_hashes")
-    if not isinstance(expected_array_hashes, Mapping):
-        raise ValueError("Haller metadata 缺少 artifact_array_hashes")
-    actual_array_hashes = _artifact_array_hashes(
-        arrays["haller_gt"],
-        arrays["anchor_state"],
-        arrays["anchor_confidence"],
-        arrays["standard_ivd"],
-        arrays["omega"],
-    )
     solid_path = out / "solid_mask.npy"
+    valid_fluid_path = out / "valid_fluid_mask.npy"
+    invalid_path = out / "invalid_mask.npy"
+    missing_masks = [
+        str(path)
+        for path in (solid_path, valid_fluid_path, invalid_path)
+        if not path.exists()
+    ]
+    if missing_masks:
+        raise ValueError(
+            "当前 Haller standard IVD artifact 缺少显式 mask 文件："
+            f"{missing_masks!r}"
+        )
     solid = None
     if solid_path.exists():
         solid = np.load(solid_path, allow_pickle=False)
@@ -2221,12 +2481,48 @@ def load_haller_artifact(
             raise ValueError(f"artifact solid_mask dtype {solid.dtype} 与保存契约 uint8 不符")
         if not np.all(np.isin(solid, [0, 1])):
             raise ValueError("artifact solid_mask 必须是 0/1")
-        actual_array_hashes["solid_mask"] = _hash_array(solid)
+    valid_fluid = None
+    if valid_fluid_path.exists():
+        valid_fluid = np.load(valid_fluid_path, allow_pickle=False)
+        if valid_fluid.shape != shape or valid_fluid.dtype != np.dtype(np.uint8):
+            raise ValueError("artifact valid_fluid_mask 形状或 dtype 不符合保存契约")
+        if not np.all(np.isin(valid_fluid, [0, 1])):
+            raise ValueError("artifact valid_fluid_mask 必须是 0/1")
+    invalid = None
+    if invalid_path.exists():
+        invalid = np.load(invalid_path, allow_pickle=False)
+        if invalid.shape != shape or invalid.dtype != np.dtype(np.uint8):
+            raise ValueError("artifact invalid_mask 形状或 dtype 不符合保存契约")
+        if not np.all(np.isin(invalid, [0, 1])):
+            raise ValueError("artifact invalid_mask 必须是 0/1")
+    if valid_fluid is not None and invalid is not None and np.any(valid_fluid & invalid):
+        raise ValueError("artifact valid_fluid_mask 与 invalid_mask 不能重叠")
+    if solid is not None and valid_fluid is not None and np.any(solid & valid_fluid):
+        raise ValueError("artifact solid_mask 与 valid_fluid_mask 不能重叠")
+    if solid is not None and invalid is not None and np.any(solid & invalid):
+        raise ValueError("artifact solid_mask 与 invalid_mask 不能重叠")
+    expected_array_hashes = metadata.get("artifact_array_hashes")
+    if not isinstance(expected_array_hashes, Mapping):
+        raise ValueError("Haller metadata 缺少 artifact_array_hashes")
+    actual_array_hashes = _artifact_array_hashes(
+        arrays["haller_gt"],
+        arrays["anchor_state"],
+        arrays["anchor_confidence"],
+        arrays["standard_ivd"],
+        arrays["omega"],
+        solid,
+        valid_fluid,
+        invalid,
+    )
     if dict(expected_array_hashes) != actual_array_hashes:
         raise ValueError("Haller artifact 数组 hash 校验失败")
     result: dict[str, Any] = {**arrays, "metadata": metadata}
     if solid is not None:
         result["solid_mask"] = solid.astype(bool)
+    if valid_fluid is not None:
+        result["valid_fluid_mask"] = valid_fluid.astype(bool)
+    if invalid is not None:
+        result["invalid_mask"] = invalid.astype(bool)
     return result
 
 
@@ -2245,6 +2541,85 @@ def generate_haller_artifact(
     if out_dir is not None:
         result["artifact_paths"] = save_haller_artifact(result, out_dir)
     return result
+
+
+# --------------------------------------------------------------------------- evidence tracer public wrappers
+
+def trace_haller_evidence(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Build the versioned, layered evidence bundle for one development frame.
+
+    The implementation lives in :mod:`haller_evidence` so the original
+    extractor and its legacy W1-H artifact seam remain backwards compatible.
+    This lazy wrapper keeps importing the strict extractor cheap for callers
+    that only load historical artifacts.
+    """
+    from haller_evidence import trace_haller_evidence as _trace
+
+    return _trace(*args, **kwargs)
+
+
+def save_haller_evidence_artifact(
+    *args: Any, **kwargs: Any
+) -> dict[str, str]:
+    """Persist a complete layered evidence bundle atomically."""
+    from haller_evidence import save_haller_evidence_artifact as _save
+
+    return _save(*args, **kwargs)
+
+
+def load_haller_evidence_artifact(
+    *args: Any, **kwargs: Any
+) -> dict[str, Any]:
+    """Load and integrity-check a versioned evidence bundle."""
+    from haller_evidence import load_haller_evidence_artifact as _load
+
+    return _load(*args, **kwargs)
+
+
+def summarize_haller_evidence(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Recompute layer counts and status from a loaded evidence bundle."""
+    from haller_evidence import summarize_haller_evidence as _summarize
+
+    return _summarize(*args, **kwargs)
+
+
+def require_trusted_haller_evidence(
+    *args: Any, **kwargs: Any
+) -> dict[str, Any]:
+    """Require an explicit R2 freeze authorization for Haller trust.
+
+    The legacy/R1 evidence path remains governed by ``haller_evidence``.  The
+    exact Haller-v2 artifact has its own versioned loader and independent
+    freeze-manifest check, so it is delegated without weakening the legacy
+    candidate gate.
+    """
+    artifact = args[0] if args else kwargs.get("artifact")
+    if isinstance(artifact, (str, pathlib.Path)):
+        artifact_path = pathlib.Path(artifact)
+        if (artifact_path / "haller_v2_meta.json").exists():
+            from haller_v2_postprocessing import require_trusted_haller_v2
+
+            freeze_manifest = kwargs.pop("freeze_manifest", None)
+            kwargs.pop("protocol_manifest", None)
+            return require_trusted_haller_v2(artifact_path, freeze_manifest)
+    if isinstance(artifact, Mapping):
+        metadata = artifact.get("metadata")
+        if isinstance(metadata, Mapping) and metadata.get("artifact_type") == (
+            "haller_v2_layered_evidence"
+        ):
+            from haller_v2_postprocessing import require_trusted_haller_v2
+
+            artifact_dir = artifact.get("artifact_dir")
+            freeze_manifest = kwargs.pop("freeze_manifest", None)
+            kwargs.pop("protocol_manifest", None)
+            if not isinstance(artifact_dir, (str, pathlib.Path)):
+                raise PermissionError(
+                    "loaded Haller-v2 mapping lacks its immutable artifact path"
+                )
+            return require_trusted_haller_v2(artifact_dir, freeze_manifest)
+    from haller_evidence import require_trusted_haller_evidence as _require
+
+    return _require(*args, **kwargs)
 
 
 # --------------------------------------------------------------------------- 轻量 CLI（真实 train frame preview 用）

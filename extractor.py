@@ -150,9 +150,9 @@ def integrate_pathline(u, v, mask, seed, t0, dt_out, L, xdim, ydim, tdim,
         return (x <= x_min or x >= x_max or y <= y_min or y >= y_max
                 or t < t_min or t > t_max)
 
-    for _ in range(L - 1):
+    for output_index in range(L - 1):
         # 每输出步：n_substeps 个 RK4 子步（阶段点插值 clamp 保证有限）
-        for _ in range(n_substeps):
+        for substep_index in range(n_substeps):
             k1x, k1y = velocity_at(u, v, px, py, t, xdim, ydim, tdim)
             k2x, k2y = velocity_at(u, v, px + 0.5 * h * k1x, py + 0.5 * h * k1y,
                                    t + 0.5 * h, xdim, ydim, tdim)
@@ -162,7 +162,9 @@ def integrate_pathline(u, v, mask, seed, t0, dt_out, L, xdim, ydim, tdim,
                                    t + h, xdim, ydim, tdim)
             px += (h / 6.0) * (k1x + 2.0 * k2x + 2.0 * k3x + k4x)
             py += (h / 6.0) * (k1y + 2.0 * k2y + 2.0 * k3y + k4y)
-            t += h
+            # 从原时间原点和整数索引调度，避免 t += h 的舍入误差
+            # 随子步数累计后把合法窗口末点误判为时间越界。
+            t = float(t0) + (output_index + (substep_index + 1) / n_substeps) * float(dt_out)
         # 输出步新点检查
         if _out_of_domain(px, py, t):
             status = STATUS_OUT_OF_DOMAIN
@@ -204,6 +206,18 @@ def reseed(seed, mask, center, xdim, ydim, rng=None, max_attempts=50):
     零方向）→ ValueError（上层采样应避开全固体 patch）。
     种子不在固体 → 原样返回（无扰动）。
     """
+    candidate = _reseed_or_none(seed, mask, center, xdim, ydim,
+                                rng=rng, max_attempts=max_attempts)
+    if candidate is not None:
+        return candidate
+    direction = np.asarray(center, dtype=np.float64) - np.asarray(seed, dtype=np.float64)
+    if np.hypot(direction[0], direction[1]) <= 0.0:
+        raise ValueError("种子与 patch 中心重合且中心在固体中，无法重播种")
+    raise ValueError("patch 全固体，无法重播种")
+
+
+def _reseed_or_none(seed, mask, center, xdim, ydim, rng=None, max_attempts=50):
+    """Use the same reseeding search; None means this candidate has no fluid point."""
     if not mask_at(mask, seed[0], seed[1], xdim, ydim):
         return np.asarray(seed, dtype=np.float64)
     rng = rng if rng is not None else np.random.default_rng()
@@ -211,7 +225,7 @@ def reseed(seed, mask, center, xdim, ydim, rng=None, max_attempts=50):
     center = np.asarray(center, dtype=np.float64)
     direction = center - seed
     if np.hypot(direction[0], direction[1]) <= 0.0:
-        raise ValueError("种子与 patch 中心重合且中心在固体中，无法重播种")
+        return None
     for _ in range(max_attempts):
         shift = rng.uniform(0.00001, 0.5)
         cand = seed + shift * direction
@@ -222,7 +236,7 @@ def reseed(seed, mask, center, xdim, ydim, rng=None, max_attempts=50):
         cand = seed + s * direction
         if not mask_at(mask, cand[0], cand[1], xdim, ydim):
             return cand
-    raise ValueError("patch 全固体，无法重播种")
+    return None
 
 
 # --------------------------------------------------------------------------- 样本组装
@@ -496,7 +510,7 @@ def _integrate_batched(u, v, mask, seeds, t0, dt_out, L, xdim, ydim, tdim,
         px = pos[idx, step - 1, 0].copy()
         py = pos[idx, step - 1, 1].copy()
         t = times[idx, step - 1].copy()
-        for _ in range(n_substeps):
+        for substep_index in range(n_substeps):
             k1x, k1y = _interp_pair(u, v, px, py, t, xdim, ydim, tdim)
             k2x, k2y = _interp_pair(u, v, px + 0.5 * h * k1x, py + 0.5 * h * k1y,
                                     t + 0.5 * h, xdim, ydim, tdim)
@@ -506,7 +520,8 @@ def _integrate_batched(u, v, mask, seeds, t0, dt_out, L, xdim, ydim, tdim,
                                     t + h, xdim, ydim, tdim)
             px += (h / 6.0) * (k1x + 2.0 * k2x + 2.0 * k3x + k4x)
             py += (h / 6.0) * (k1y + 2.0 * k2y + 2.0 * k3y + k4y)
-            t += h
+            # 与标量积分器使用相同的原点/索引时间调度。
+            t.fill(float(t0) + (step - 1 + (substep_index + 1) / n_substeps) * float(dt_out))
         # 输出步检查（与标量同序：出域 → 入固）
         out_ok = ~((px <= x_min) | (px >= x_max) | (py <= y_min) | (py >= y_max)
                    | (t < t_min) | (t > t_max))
@@ -537,7 +552,8 @@ def extract_pathlines_batched(u, v, mask, ivd, xdim, ydim, tdim,
                               patch_yx, patch_size=(32, 32), t0=0.0, L=16,
                               groups=(8, 8), delta_frac=0.05, t_win_frames=24,
                               n_substeps=4, dt_out=None, rng=None,
-                              max_integration_attempts=3, return_seeds=False):
+                              max_integration_attempts=3, return_seeds=False,
+                              initial_seeds=None, retain_initial_failures=False):
     """向量化批量迹线提取（票 05；供 dataset 的 on-the-fly 样本生成）
     → (L, K, 7) float32（与 extract_pathlines 同口径同公式）。
 
@@ -552,6 +568,9 @@ def extract_pathlines_batched(u, v, mask, ivd, xdim, ydim, tdim,
       语义（JittorReSeeding）的不同随机实现，不保证逐元素一致。
     - return_seeds=True 返回 (out, seeds)（seeds = 每条迹线的最终种子，
       重播种/重试后的实际出发位置，供标签判定与可视化）。
+    - retain_initial_failures=True 将无法重播种的初始固体种子原位冻结，
+      不送入 RK4 或短迹线重试；供 MFC 的 solid/failed loss 排除使用。
+      默认仍通过 reseed 抛错，保留已有初始固体保护。
     """
     u = np.asarray(u)
     v = np.asarray(v)
@@ -572,13 +591,15 @@ def extract_pathlines_batched(u, v, mask, ivd, xdim, ydim, tdim,
         rng_base = int(np.random.default_rng().integers(0, 2 ** 31))
     center = np.array([cx, cy])
     K = gy * gx * 4
-    out = np.zeros((L, K, N_CHANNELS), dtype=np.float32)
 
     # 阶段 1：逐 k 首次重播种（per-k 确定性派生，样本级可复现）。
     # 惰性 rng：仅对落固体的种子构造（全流体 patch 零 rng 开销；确定性保持一致：
     # 每 k 的派生只依赖 (rng_base, k)，与消费与否无关）。
     seeds = np.array(seeding_grid(patch_yx, patch_size, xdim, ydim,
-                                  groups, delta_frac), dtype=np.float64)
+                                  groups, delta_frac) if initial_seeds is None
+                     else initial_seeds, dtype=np.float64, copy=True)
+    if seeds.shape != (K, 2) or not np.isfinite(seeds).all():
+        raise ValueError("initial_seeds must have finite shape=(groups product * 4, 2)")
     mask2d = None
     if mask is not None:
         m = np.asarray(mask, dtype=bool)
@@ -590,35 +611,74 @@ def extract_pathlines_batched(u, v, mask, ivd, xdim, ydim, tdim,
         solid_k = np.nonzero(mask2d[j, i])[0]
     else:
         solid_k = np.empty(0, dtype=np.intp)
+    initial_failed = np.zeros(K, dtype=bool)
     for k in solid_k:
         rng_k = np.random.default_rng(np.random.SeedSequence([rng_base, k]))
-        seeds[k] = reseed(seeds[k], mask, center, xdim, ydim, rng=rng_k)
+        if retain_initial_failures:
+            candidate = _reseed_or_none(seeds[k], mask, center, xdim, ydim, rng=rng_k)
+            if candidate is None:
+                initial_failed[k] = True
+            else:
+                seeds[k] = candidate
+        else:
+            seeds[k] = reseed(seeds[k], mask, center, xdim, ydim, rng=rng_k)
 
     # 阶段 2：批量积分（失效迹线冻结为重复末点）
-    pos, times, n = _integrate_batched(
-        u, v, mask, seeds, float(t0), dt_out, L, xdim, ydim, tdim,
-        n_substeps=n_substeps)
+    if initial_failed.any():
+        pos = np.repeat(seeds[:, None, :], L, axis=1)
+        times = np.full((K, L), float(t0), dtype=np.float64)
+        n = np.ones(K, dtype=np.intp)
+        eligible = ~initial_failed
+        if eligible.any():
+            pos[eligible], times[eligible], n[eligible] = _integrate_batched(
+                u, v, mask, seeds[eligible], float(t0), dt_out, L, xdim, ydim, tdim,
+                n_substeps=n_substeps)
+    else:
+        pos, times, n = _integrate_batched(
+            u, v, mask, seeds, float(t0), dt_out, L, xdim, ydim, tdim,
+            n_substeps=n_substeps)
 
     # 阶段 3：短迹线（≤2 点）按 k 序重试（仿逐条版 suc 判据；低频兜底，
     # 逐条标量函数复用 → 公式同源）
-    for k in np.nonzero(n <= 2)[0]:
+    for k in np.nonzero((n <= 2) & ~initial_failed)[0]:
         seed = seeds[k]
-        pos_k = times_k = None
+        integrated_seed = seed.copy()
+        pos_k = pos[k, :n[k]].copy()
+        times_k = times[k, :n[k]].copy()
         for attempt in range(max_integration_attempts):
             rng_k = np.random.default_rng(
                 np.random.SeedSequence([rng_base, k, attempt]))
-            seed = reseed(seed, mask, center, xdim, ydim, rng=rng_k)
+            candidate = _reseed_or_none(seed, mask, center, xdim, ydim, rng=rng_k)
+            if candidate is None:
+                # Keep the most recent actual path/seed. The candidate was
+                # never integrated; endpoint padding records this short path
+                # for the existing downstream failed-trajectory exclusions.
+                break
+            seed = candidate
             pos_k, times_k, _status = integrate_pathline(
                 u, v, mask, seed, float(t0), dt_out, L, xdim, ydim, tdim,
                 n_substeps=n_substeps)
+            integrated_seed = seed.copy()
             if len(pos_k) >= 3 or attempt == max_integration_attempts - 1:
                 break
             seed = seed + 0.5 * (center - seed)     # 朝 patch 中心大幅移动后重试
-        seeds[k] = seed
+        seeds[k] = integrated_seed
         n[k] = len(pos_k)
         pos[k] = pad_repeat_last(pos_k, L)
         times[k] = pad_repeat_last(times_k[:, None], L)[:, 0]
 
+    out = _assemble_pathline_features(u, v, ivd, xdim, ydim, tdim,
+                                      geo, seeds, pos, times)
+    if return_seeds:
+        return out, seeds
+    return out
+
+
+def _assemble_pathline_features(u, v, ivd, xdim, ydim, tdim, geo, seeds, pos, times):
+    """Keep per-patch channel assembly unchanged after a shared integration."""
+    K, L = times.shape
+    cx, cy, hx, hy = geo["cx"], geo["cy"], geo["hx"], geo["hy"]
+    out = np.zeros((L, K, N_CHANNELS), dtype=np.float32)
     # 通道组装（与逐条版同公式）：位置已归一化；t/ivd/dist/u/v 原始值
     out[:, :, CH_PX] = ((pos[:, :, 0] - cx) / hx).T
     out[:, :, CH_PY] = ((pos[:, :, 1] - cy) / hy).T
@@ -633,9 +693,63 @@ def extract_pathlines_batched(u, v, mask, ivd, xdim, ydim, tdim,
                                   xdim, ydim, tdim).reshape(K, L).T
     out[:, :, CH_V] = interp_path(v, pos.reshape(-1, 2), times.ravel(),
                                   xdim, ydim, tdim).reshape(K, L).T
-    if return_seeds:
-        return out, seeds
     return out
+
+
+def extract_pathlines_batched_patches(u, v, mask, ivd, xdim, ydim, tdim,
+                                      patch_yxs, rng_bases, *, patch_size=(32, 32),
+                                      t0=0.0, L=16, groups=(8, 8), delta_frac=.05,
+                                      t_win_frames=24, n_substeps=4, dt_out=None):
+    """Merge the first integration of same-field patches, preserving patch order.
+
+    Patches with initial solid seeds use the original reseeding path. Patches
+    whose merged first integration needs a short-path retry are recomputed by
+    the original extractor with their unchanged explicit local RNG base.
+    No reseeding/retry RNG is interpreted as a global trajectory index.
+    """
+    u, v = np.asarray(u), np.asarray(v)
+    xdim, ydim, tdim = (np.asarray(value, dtype=np.float64) for value in (xdim, ydim, tdim))
+    if dt_out is None:
+        dt_out = (t_win_frames - 1) * (tdim[1] - tdim[0]) / (L - 1)
+    geometries, grids, eligible = [], [], []
+    mask2d = None if mask is None else np.asarray(mask, dtype=bool)
+    if mask2d is not None and mask2d.ndim == 3:
+        mask2d = mask2d[0]
+    for patch_index, patch in enumerate(patch_yxs):
+        geometries.append(patch_geometry(patch, patch_size, xdim, ydim))
+        seeds = np.array(seeding_grid(patch, patch_size, xdim, ydim, groups, delta_frac),
+                         dtype=np.float64, copy=True)
+        grids.append(seeds)
+        solid = False
+        if mask2d is not None:
+            j, i = nearest_cell(seeds[:, 0], seeds[:, 1], xdim, ydim)
+            solid = mask2d[np.clip(j, 0, mask2d.shape[0] - 1),
+                           np.clip(i, 0, mask2d.shape[1] - 1)].any()
+        if not solid:
+            eligible.append(patch_index)
+    integrated = {}
+    if eligible:
+        K = grids[eligible[0]].shape[0]
+        pos, times, lengths = _integrate_batched(u, v, mask,
+            np.concatenate([grids[index] for index in eligible]), float(t0), dt_out,
+            L, xdim, ydim, tdim, n_substeps=n_substeps)
+        for row, patch_index in enumerate(eligible):
+            selection = slice(row * K, (row + 1) * K)
+            if np.all(lengths[selection] > 2):
+                integrated[patch_index] = (pos[selection], times[selection])
+    rows = []
+    for index, patch in enumerate(patch_yxs):
+        if index in integrated:
+            pos, times = integrated[index]
+            raw = _assemble_pathline_features(u, v, ivd, xdim, ydim, tdim,
+                geometries[index], grids[index], pos, times)
+            rows.append((raw, grids[index]))
+        else:
+            rows.append(extract_pathlines_batched(u, v, mask, ivd, xdim, ydim, tdim,
+                patch_yx=patch, patch_size=patch_size, t0=t0, L=L, groups=groups,
+                delta_frac=delta_frac, t_win_frames=t_win_frames, n_substeps=n_substeps,
+                dt_out=dt_out, rng=rng_bases[index], return_seeds=True))
+    return rows
 
 
 # --------------------------------------------------------------------------- 可视化（验收 1：目检）

@@ -1,0 +1,41 @@
+{
+  "model": {
+    "NAME": "BaseSeg",
+    "encoder_args": {
+      "NAME": "PathlineTransformerV0", "in_channels": 7, "PathlineGroups": 64,
+      "KpathlinePerGroup": 4, "num_classes": 1, "num_encoder_layers": 3,
+      "dmodel": 144, "k": 16, "activation_checkpointing": true
+    },
+    "criterion_args": {"NAME": "BCELoss"}
+  },
+  "train": {
+    "epochs": 100, "lr": 0.0001, "weight_decay": 0.000001,
+    "warmup_epochs": 60, "second_lr": 0.000005, "grad_clip": 1.0,
+    "amp": false, "data_parallel": false
+  },
+  "sampling": {
+    "samples_per_epoch": 20000, "batch_size": 32, "positive_fraction": 0.5,
+    "num_workers": 0, "patch_size": [32,32], "stride": [16,16], "t_win": 24,
+    "window_step": 4, "groups": [8,8], "delta_frac": 0.05,
+    "L": 16, "n_substeps": 4, "t_scale": 0.25
+  },
+  "w3": {
+    "contrastive_weight": 0.1, "temperature": 0.1, "max_embeddings": 512,
+    "view_count": 2, "projection_dim": 64
+  },
+  "run_metadata": {
+    "scope": "Ticket09 paired seven-source W3 development",
+    "seeds": [0,1], "supported_seed_after_go": 2,
+    "trajectory_identity_source": "known_p95p80_train",
+    "haller_anchor_identity_source": null, "final_test_source_read": false,
+    "planned_updates": 39100, "planned_patches": 2000000,
+    "projection_initialization_seed_offset": 60013, "extra_view_seed_offset": 40021,
+    "contrastive_patch_selection": "first two actual batch patches; known P95/P80 identities only",
+    "activation_checkpointing": false, "gpu_memory_limit_gib": 18,
+    "baseline": "seven_source_W1-P",
+    "sampling_stages": [
+      {"start_epoch":0,"end_epoch":25,"batch_size":32},
+      {"start_epoch":25,"end_epoch":100,"batch_size":64}
+    ]
+  }
+}

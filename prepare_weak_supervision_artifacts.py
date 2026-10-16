@@ -6,8 +6,9 @@ Haller train/calibration/test artifacts。它不改变 Haller 提取算法，也
 test Haller 标签传给训练路径；所有工程参数和文献状态都由现有
 ``haller_anchors`` 实现写入并保留 ``pending_verification``。
 
-历史 ``outputs/datasets/<dataset>/dataset`` 只作为原始速度/IVD/p85 sampling
-输入读取。新产物写入独立 namespace，避免覆盖阶段 0 baseline。
+历史 ``outputs/datasets/<dataset>/dataset`` 只作为原始速度场和 geometry
+输入读取。历史 IVD/label 文件不进入新协议计算；新产物写入独立 namespace，
+避免覆盖阶段 0 baseline。
 """
 
 from __future__ import annotations
@@ -28,7 +29,6 @@ import numpy as np
 
 import dataset
 import haller_anchors
-import w1_p
 import weak_supervision_contract as contract
 
 
@@ -204,8 +204,6 @@ def _load_legacy_dataset(input_root: pathlib.Path, name: str) -> dict[str, Any]:
     paths = {
         "u": root / dataset.FN_U,
         "v": root / dataset.FN_V,
-        "ivd": root / dataset.FN_IVD,
-        "labels": root / dataset.FN_LABEL,
         "mask": root / dataset.FN_MASK,
     }
     missing = [str(path) for path in paths.values() if not path.exists()]
@@ -217,7 +215,7 @@ def _load_legacy_dataset(input_root: pathlib.Path, name: str) -> dict[str, Any]:
         key: np.load(path, mmap_mode="r" if key != "mask" else None, allow_pickle=False)
         for key, path in paths.items()
     }
-    for key in ("u", "v", "ivd", "labels"):
+    for key in ("u", "v"):
         if tuple(arrays[key].shape) != shape:
             raise ValueError(
                 f"dataset={name!r} {key} shape={arrays[key].shape} != {shape}"
@@ -268,6 +266,8 @@ def _weak_dataset_is_ready(
         dataset.FN_IVD,
         dataset.FN_LABEL,
         dataset.FN_MASK,
+        dataset.FN_VALID_FLUID_MASK,
+        dataset.FN_INVALID_MASK,
     )
     if any(not (root / filename).exists() for filename in required_files):
         return False
@@ -283,6 +283,8 @@ def _weak_dataset_is_ready(
             "ivd": _array_hash(np.load(root / dataset.FN_IVD, mmap_mode="r", allow_pickle=False)),
             "labels": _array_hash(np.load(root / dataset.FN_LABEL, mmap_mode="r", allow_pickle=False)),
             "mask": _array_hash(np.asarray(np.load(root / dataset.FN_MASK, allow_pickle=False), dtype=np.uint8)),
+            "valid_fluid_mask": _array_hash(np.load(root / dataset.FN_VALID_FLUID_MASK, mmap_mode="r", allow_pickle=False)),
+            "invalid_mask": _array_hash(np.load(root / dataset.FN_INVALID_MASK, mmap_mode="r", allow_pickle=False)),
         }
     except (OSError, ValueError, TypeError):
         return False
@@ -299,6 +301,11 @@ def _weak_dataset_is_ready(
         and meta.get("normalization_frozen") is True
         and meta.get("window", {}).get("t_win") == t_win
         and meta.get("window", {}).get("window_step") == window_step
+        and isinstance(meta.get("ivd_provenance"), Mapping)
+        and meta["ivd_provenance"].get("source_identity") == (
+            dataset.standard_ivd.SOURCE_IDENTITY
+        )
+        and meta["ivd_provenance"].get("formula") == dataset.standard_ivd.FORMULA
     )
 
 
@@ -314,11 +321,11 @@ def prepare_weak_dataset(
     out = output_root / "datasets" / name / "dataset"
     out.parent.mkdir(parents=True, exist_ok=True)
     shape = tuple(int(value) for value in source["shape"])
+    # Do not include legacy IVD or label bytes in the identity of the new
+    # dataset.  The shared standard source is recomputed from u/v below.
     input_hashes = {
         "u": _array_hash(np.asarray(source["u"], dtype=np.float32)),
         "v": _array_hash(np.asarray(source["v"], dtype=np.float32)),
-        "ivd": _array_hash(np.asarray(source["ivd"], dtype=np.float32)),
-        "labels": _array_hash(np.asarray(source["labels"], dtype=np.uint8)),
         "mask": _array_hash(np.asarray(source["mask"], dtype=np.uint8)),
         "xdim": _array_hash(np.asarray(source["xdim"], dtype=np.float64)),
         "ydim": _array_hash(np.asarray(source["ydim"], dtype=np.float64)),
@@ -338,8 +345,7 @@ def prepare_weak_dataset(
         ydim=source["ydim"],
         tdim=source["tdim"],
         mask=source["mask"],
-        ivd=source["ivd"],
-        labels=source["labels"],
+        labels=None,
         split_mode=dataset.WEAK_SUPERVISION_SPLIT_MODE,
         dataset_name=name,
         label_source=contract.LABEL_SOURCE_LEGACY_P85,
@@ -356,6 +362,8 @@ def prepare_weak_dataset(
         "ivd": np.load(out / dataset.FN_IVD, mmap_mode="r", allow_pickle=False),
         "labels": np.load(out / dataset.FN_LABEL, mmap_mode="r", allow_pickle=False),
         "mask": np.asarray(np.load(out / dataset.FN_MASK, allow_pickle=False), dtype=np.uint8),
+        "valid_fluid_mask": np.load(out / dataset.FN_VALID_FLUID_MASK, mmap_mode="r", allow_pickle=False),
+        "invalid_mask": np.load(out / dataset.FN_INVALID_MASK, mmap_mode="r", allow_pickle=False),
     }
     meta = copy.deepcopy(meta)
     meta["input_array_hashes"] = input_hashes
@@ -382,104 +390,18 @@ def prepare_w1_p_target(
     *,
     name: str,
 ) -> dict[str, Any]:
-    """生成 train-only p90/p60/unknown target，不写 calibration/test labels。"""
-    root = weak_root / "datasets" / name / "dataset"
-    meta, _ = _read_json(root / dataset.FN_META)
-    start, end = (int(value) for value in meta["split_ranges"]["train"])
-    ivd = np.load(root / dataset.FN_IVD, mmap_mode="r", allow_pickle=False)
-    solid = np.load(root / dataset.FN_MASK, allow_pickle=False).astype(bool)
-    out = output_root / "w1_p_targets" / name
-    input_ivd_hash = _array_hash(ivd)
-    input_mask_hash = _array_hash(solid)
-    target_files = {
-        "anchor_state": (np.int8, ("anchor_state.npy",)),
-        "labels": (np.float32, ("labels.npy",)),
-        "label_mask": (np.uint8, ("label_mask.npy",)),
-        "unknown_mask": (np.uint8, ("unknown_mask.npy",)),
-    }
-    target_meta_path = out / "target_meta.json"
-    if target_meta_path.exists() and all(
-        (out / filename).exists()
-        for _, (_, filenames) in target_files.items()
-        for filename in filenames
-    ):
-        try:
-            existing, _ = _read_json(target_meta_path)
-            identity_matches = (
-                existing.get("artifact_type") == "w1_p_train_target"
-                and existing.get("dataset_name") == name
-                and existing.get("split_name") == "train"
-                and existing.get("frame_range") == [start, end]
-                and existing.get("input_dataset_contract_hash") == meta["contract_hash"]
-                and existing.get("input_ivd_hash") == input_ivd_hash
-                and existing.get("input_mask_hash") == input_mask_hash
-                and existing.get("legacy_p85_used") is False
-                and existing.get("calibration_test_frames_written") is False
-            )
-            arrays_match = identity_matches
-            declared_target_hashes = existing.get("target_array_hashes")
-            if not isinstance(declared_target_hashes, Mapping):
-                arrays_match = False
-            for key, (dtype, filenames) in target_files.items():
-                if not arrays_match:
-                    break
-                array = np.load(out / filenames[0], mmap_mode="r", allow_pickle=False)
-                arrays_match = (
-                    tuple(array.shape) == tuple(ivd.shape)
-                    and array.dtype == np.dtype(dtype)
-                    and declared_target_hashes.get(key) == _array_hash(array)
-                )
-            if arrays_match:
-                return existing
-        except PermissionError:
-            raise
-        except (OSError, ValueError, KeyError, json.JSONDecodeError):
-            pass
-    thresholds = w1_p.compute_w1_p_thresholds(
-        ivd,
-        solid,
-        train_frame_range=(start, end),
-        dataset_name=name,
-        split_name="train",
+    """Retired historical P90/P60 target entry point.
+
+    Ticket 03 artifacts are materialized only by
+    :mod:`ticket03_standard_ivd_artifacts`.  Keeping this callable as an
+    explicit failure prevents a caller from silently reopening ``ivd.npy`` or
+    emitting the incompatible ``w1_p_targets`` schema.
+    """
+    raise RuntimeError(
+        "历史 P90/P60 W1-P target generator 已停用；请使用 "
+        "ticket03_standard_ivd_artifacts 生成并使用 Ticket 03 P95/P80 "
+        "train_target/calibration_reference artifact"
     )
-    target = w1_p.build_w1_p_target_field(
-        ivd,
-        solid,
-        thresholds,
-        train_frame_range=(start, end),
-        dataset_name=name,
-        split_name="train",
-    )
-    out.mkdir(parents=True, exist_ok=True)
-    metadata = copy.deepcopy(target.metadata)
-    metadata.update({
-        "artifact_type": "w1_p_train_target",
-        "input_dataset_contract_hash": meta["contract_hash"],
-        "input_ivd_hash": _array_hash(ivd),
-        "input_mask_hash": _array_hash(solid),
-        "legacy_p85_used": False,
-        "calibration_test_frames_written": False,
-        "source": "w1_p_train",
-        "window": copy.deepcopy(meta.get("window", {})),
-    })
-    target_arrays = {
-        "anchor_state": target.anchor_state.astype(np.int8),
-        "labels": target.labels.astype(np.float32),
-        "label_mask": target.label_mask.astype(np.uint8),
-        "unknown_mask": target.unknown_mask.astype(np.uint8),
-    }
-    metadata["target_array_hashes"] = {
-        key: _array_hash(array) for key, array in target_arrays.items()
-    }
-    np.save(out / "anchor_state.npy", target_arrays["anchor_state"])
-    np.save(out / "labels.npy", target_arrays["labels"])
-    np.save(out / "label_mask.npy", target_arrays["label_mask"])
-    np.save(out / "unknown_mask.npy", target_arrays["unknown_mask"])
-    (out / "target_meta.json").write_text(
-        json.dumps(metadata, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return metadata
 
 
 def _slim_haller_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
@@ -541,6 +463,12 @@ def _manifest_for(
         if record["mask_hash"] != first["mask_hash"]:
             raise ValueError("同一 Haller manifest 的 mask_hash 发生漂移")
         for key in (
+            "ivd_source_identity",
+            "ivd_formula",
+            "valid_fluid_mask_hash",
+            "invalid_mask_hash",
+            "anchor_semantics",
+            "dense_negative_generated",
             "backend_requested",
             "resolved",
             "backend",
@@ -580,6 +508,12 @@ def _manifest_for(
         "contour_mode": first["contour_mode"],
         "input_hash": _hash_strings([record["input_hash"] for record in records]),
         "mask_hash": first["mask_hash"],
+        "ivd_source_identity": copy.deepcopy(first["ivd_source_identity"]),
+        "ivd_formula": first["ivd_formula"],
+        "valid_fluid_mask_hash": first["valid_fluid_mask_hash"],
+        "invalid_mask_hash": first["invalid_mask_hash"],
+        "anchor_semantics": first["anchor_semantics"],
+        "dense_negative_generated": first["dense_negative_generated"],
         "frame_range": list(frame_range),
         "frame_count": len(records),
         "valid_frame_count": sum(int(record["valid"]) for record in records),
@@ -598,6 +532,8 @@ def _manifest_for(
                 "parameter_hash": record["parameter_hash"],
                 "input_hash": record["input_hash"],
                 "mask_hash": record["mask_hash"],
+                "valid_fluid_mask_hash": record["valid_fluid_mask_hash"],
+                "invalid_mask_hash": record["invalid_mask_hash"],
                 "artifact_array_hashes": copy.deepcopy(record["artifact_array_hashes"]),
                 "failure_count": int(record["failure_count"]),
                 "valid": bool(record["valid"]),
@@ -629,6 +565,32 @@ def _prepare_haller_frame(
     xdim = source_data["xdim"]
     ydim = source_data["ydim"]
     mask = source_data["mask"]
+    valid_fluid_masks = source_data.get("valid_fluid_mask")
+    invalid_masks = source_data.get("invalid_mask")
+    valid_fluid_frame = None
+    if valid_fluid_masks is not None:
+        valid_array = np.asarray(valid_fluid_masks)
+        if valid_array.ndim == 2:
+            valid_fluid_frame = np.asarray(valid_array, dtype=bool)
+        elif valid_array.ndim == 3 and frame < valid_array.shape[0]:
+            valid_fluid_frame = np.asarray(valid_array[frame], dtype=bool)
+        else:
+            raise ValueError(
+                "Haller valid_fluid_mask 必须是 (Y,X) 或可覆盖当前 frame 的 "
+                "(T,Y,X)"
+            )
+    invalid_frame = None
+    if invalid_masks is not None:
+        invalid_array = np.asarray(invalid_masks)
+        if invalid_array.ndim == 2:
+            invalid_frame = np.asarray(invalid_array, dtype=bool)
+        elif invalid_array.ndim == 3 and frame < invalid_array.shape[0]:
+            invalid_frame = np.asarray(invalid_array[frame], dtype=bool)
+        else:
+            raise ValueError(
+                "Haller invalid_mask 必须是 (Y,X) 或可覆盖当前 frame 的 "
+                "(T,Y,X)"
+            )
     frame_dir = output_dir / f"frame{frame}"
     metadata_path = frame_dir / "anchor_meta.json"
     expected_input_hash = haller_anchors._hash_named_arrays({
@@ -640,6 +602,16 @@ def _prepare_haller_frame(
     expected_mask_hash = haller_anchors._hash_array(
         np.asarray(mask, dtype=bool)
     )
+    expected_valid_fluid_mask_hash = None
+    if valid_fluid_frame is not None:
+        expected_valid_fluid_mask_hash = haller_anchors._hash_array(
+            valid_fluid_frame
+        )
+    expected_invalid_mask_hash = None
+    if invalid_frame is not None:
+        expected_invalid_mask_hash = haller_anchors._hash_array(
+            invalid_frame
+        )
     result: dict[str, Any]
     if resume and metadata_path.exists():
         try:
@@ -656,6 +628,18 @@ def _prepare_haller_frame(
                 raise ValueError("已有 Haller artifact 的 input_hash 不匹配")
             if metadata.get("mask_hash") != expected_mask_hash:
                 raise ValueError("已有 Haller artifact 的 mask_hash 不匹配")
+            if (
+                expected_valid_fluid_mask_hash is not None
+                and metadata.get("valid_fluid_mask_hash")
+                != expected_valid_fluid_mask_hash
+            ):
+                raise ValueError("已有 Haller artifact 的 valid_fluid_mask_hash 不匹配")
+            if (
+                expected_invalid_mask_hash is not None
+                and metadata.get("invalid_mask_hash")
+                != expected_invalid_mask_hash
+            ):
+                raise ValueError("已有 Haller artifact 的 invalid_mask_hash 不匹配")
             if metadata.get("split_name") != split_name:
                 raise ValueError("已有 Haller artifact 的 split_name 不匹配")
             if metadata.get("window") != dict(window):
@@ -671,6 +655,8 @@ def _prepare_haller_frame(
                 backend=backend,
                 device=device,
                 contour_mode=contour_mode,
+                valid_fluid_mask=valid_fluid_frame,
+                invalid_mask=invalid_frame,
             )
             result["metadata"] = _slim_haller_metadata(result["metadata"])
             result["metadata"].update({
@@ -686,6 +672,8 @@ def _prepare_haller_frame(
             backend=backend,
             device=device,
             contour_mode=contour_mode,
+            valid_fluid_mask=valid_fluid_frame,
+            invalid_mask=invalid_frame,
         )
         result["metadata"] = _slim_haller_metadata(result["metadata"])
         result["metadata"].update({
@@ -710,6 +698,12 @@ def _prepare_haller_frame(
         "contour_mode": metadata["contour_mode"],
         "input_hash": metadata["input_hash"],
         "mask_hash": metadata["mask_hash"],
+        "ivd_source_identity": copy.deepcopy(metadata["ivd_source_identity"]),
+        "ivd_formula": metadata["ivd_formula"],
+        "valid_fluid_mask_hash": metadata["valid_fluid_mask_hash"],
+        "invalid_mask_hash": metadata["invalid_mask_hash"],
+        "anchor_semantics": metadata["anchor_semantics"],
+        "dense_negative_generated": metadata["dense_negative_generated"],
         "split_name": metadata["split_name"],
         "window": copy.deepcopy(metadata["window"]),
         "failure_count": int(metadata["failure_count"]),
@@ -935,106 +929,17 @@ def prepare_all(
     haller_device: Any = None,
     haller_contour_mode: str = haller_anchors.CONTOUR_MODE_OPTIMIZED,
 ) -> dict[str, Any]:
-    """准备六数据集全部 artifacts，并写一份总 manifest。"""
-    input_path = pathlib.Path(input_root)
-    output_path = pathlib.Path(output_root)
-    haller_path = pathlib.Path(haller_root)
-    _assert_non_overlapping_roots(input_path, output_path, haller_path)
-    if tuple(datasets) != VALID_DATASETS:
-        raise ValueError(
-            f"WS-9 只允许六个有效 dataset 且顺序固定：{VALID_DATASETS!r}"
-        )
-    if int(t_win) <= 0 or int(window_step) <= 0:
-        raise ValueError("t_win/window_step 必须为正整数")
-    if int(haller_workers) <= 0:
-        raise ValueError("haller_workers 必须为正整数")
-    haller_backend_metadata = _resolve_cpu_haller_backend(
-        haller_backend, haller_device
-    )
-    haller_contour_mode = _normalize_contour_mode(haller_contour_mode)
-    haller_contour_mode = haller_anchors._contour_mode_for_backend(
-        haller_backend_metadata["resolved"], haller_contour_mode
-    )
+    """Retired historical WS-9/P90/P60 aggregate entry point.
 
-    sources = {name: _load_legacy_dataset(input_path, name) for name in datasets}
-    weak_metas: dict[str, Any] = {}
-    target_metas: dict[str, Any] = {}
-    for name, source in sources.items():
-        weak_metas[name] = prepare_weak_dataset(
-            source, output_path, t_win=t_win, window_step=window_step
-        )
-        target_metas[name] = prepare_w1_p_target(
-            output_path, output_path, name=name
-        )
-        source["weak_root"] = output_path / "datasets" / name / "dataset"
-
-    haller_manifests: dict[str, dict[str, Any]] = {
-        haller_source: {}
-        for haller_source in (
-            haller_anchors.SOURCE_TRAIN,
-            haller_anchors.SOURCE_CALIBRATION,
-            haller_anchors.SOURCE_TEST,
-        )
-    }
-    for haller_source in haller_manifests:
-        for name, source in sources.items():
-            haller_manifests[haller_source][name] = prepare_haller_source(
-                source,
-                haller_path,
-                source=haller_source,
-                resume=resume,
-                workers=haller_workers,
-                backend=haller_backend,
-                device=haller_device,
-                contour_mode=haller_contour_mode,
-            )
-    total_manifest = {
-        "artifact_type": "weak_supervision_pilot_inputs",
-        "generation_version": "ws9-artifact-preparer-v3",
-        "datasets": list(datasets),
-        "split_mode": dataset.WEAK_SUPERVISION_SPLIT_MODE,
-        "t_win": int(t_win),
-        "window_step": int(window_step),
-        "patch_size": list(DEFAULT_PATCH_SIZE),
-        "stride": list(DEFAULT_STRIDE),
-        "weak_dataset_contracts": {
-            name: {
-                "contract_hash": weak_metas[name]["contract_hash"],
-                "split_ranges": weak_metas[name]["split_ranges"],
-                "generation_hash": weak_metas[name]["generation_hash"],
-                "input_hash": weak_metas[name]["input_hash"],
-                "input_array_hashes": copy.deepcopy(
-                    weak_metas[name]["input_array_hashes"]
-                ),
-                "array_hashes": copy.deepcopy(weak_metas[name]["array_hashes"]),
-            }
-            for name in datasets
-        },
-        "w1_p_targets": {
-            name: {
-                "positive_threshold": target_metas[name]["positive_threshold"],
-                "negative_threshold": target_metas[name]["negative_threshold"],
-                "input_dataset_contract_hash": target_metas[name]["input_dataset_contract_hash"],
-                "input_ivd_hash": target_metas[name]["input_ivd_hash"],
-                "input_mask_hash": target_metas[name]["input_mask_hash"],
-                "target_array_hashes": copy.deepcopy(
-                    target_metas[name]["target_array_hashes"]
-                ),
-            }
-            for name in datasets
-        },
-        "haller_manifests": haller_manifests,
-        "haller_backend": haller_backend_metadata,
-        "haller_contour_mode": haller_contour_mode,
-        "haller_literature_status": "pending_verification",
-    }
-    total_manifest["manifest_hash"] = _json_hash(total_manifest)
-    output_path.mkdir(parents=True, exist_ok=True)
-    (output_path / "artifact_manifest.json").write_text(
-        json.dumps(total_manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
+    The current aggregate build is
+    :func:`ticket03_standard_ivd_artifacts.build_ticket03_artifacts`.  Failing
+    before input/output path resolution keeps this legacy function from
+    reopening old weak datasets or producing an incompatible manifest.
+    """
+    raise RuntimeError(
+        "历史 WS-9/P90/P60 aggregate preparer 已停用；请使用 "
+        "ticket03_standard_ivd_artifacts.build_ticket03_artifacts"
     )
-    return total_manifest
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -1080,6 +985,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raise RuntimeError(
+        "历史 weak-supervision aggregate CLI 已停用；请使用 "
+        "ticket03_standard_ivd_artifacts.build_ticket03_artifacts"
+    )
     args = _parse_args(argv)
     manifest = prepare_all(
         input_root=args.input_root,

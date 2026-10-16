@@ -43,29 +43,34 @@ class TrajectoryEmbeddingAdapter(nn.Module):
     不修改或持久化 vendor module 的行为。
     """
 
-    def __init__(self, model: nn.Module):
+    def __init__(self, model: nn.Module, *, classification_mode: str = contract.MODE_W3):
         super().__init__()
+        if classification_mode not in (contract.MODE_W3, contract.MODE_W1_P):
+            raise ValueError("Trajectory embedding supports W3 or the seven-source W1-P base")
         if isinstance(model, contract.ChannelSelectingAdapter):
-            if model.mode != contract.MODE_W3:
+            if model.mode != classification_mode:
                 raise ValueError(
                     "TrajectoryEmbeddingAdapter 需要 mode=W3 的 channel adapter"
                 )
             channel_adapter = model
         else:
-            channel_adapter = contract.ChannelSelectingAdapter(model, contract.MODE_W3)
+            channel_adapter = contract.ChannelSelectingAdapter(model, classification_mode)
         self.channel_adapter = channel_adapter
-        self.mode = contract.MODE_W3
+        self.mode = classification_mode
         self.feature_schema = contract.FEATURE_SCHEMA_7
         self.input_schema = contract.FEATURE_SCHEMA_7
 
-        classifier = getattr(self.channel_adapter.model, "fc", None)
+        classifier_model = self.channel_adapter.model
+        if not hasattr(classifier_model, "fc"):
+            classifier_model = getattr(classifier_model, "encoder", classifier_model)
+        classifier = getattr(classifier_model, "fc", None)
         if not isinstance(classifier, nn.Module):
             raise ValueError(
                 "W3 local adapter 需要 wrapped model 暴露 nn.Module classifier fc"
             )
         embedding_dim = getattr(classifier, "in_features", None)
         if embedding_dim is None:
-            embedding_dim = getattr(self.channel_adapter.model, "dim", None)
+            embedding_dim = getattr(classifier_model, "dim", None)
         if embedding_dim is None:
             raise ValueError(
                 "W3 local adapter 无法推断 trajectory embedding dimension；"
@@ -108,7 +113,10 @@ class TrajectoryEmbeddingAdapter(nn.Module):
                 raise RuntimeError("W3 classifier 未提供 tensor pre-classifier embedding")
             captured.append(args[0])
 
-        classifier = getattr(self.channel_adapter.model, "fc", None)
+        classifier_model = self.channel_adapter.model
+        if not hasattr(classifier_model, "fc"):
+            classifier_model = getattr(classifier_model, "encoder", classifier_model)
+        classifier = getattr(classifier_model, "fc", None)
         if not isinstance(classifier, nn.Module):
             raise ValueError(
                 "W3 local adapter 需要 wrapped model 暴露 nn.Module classifier fc"

@@ -1,0 +1,54 @@
+{
+  "function": "existing checkpoint_metadata and read_p95p80_protocol_manifest",
+  "checks": [
+    {
+      "seed": 0,
+      "saved_seed_matches": true,
+      "epoch": 100,
+      "global_step": 39100,
+      "history_rows": 100,
+      "history_sample_total": 2000000,
+      "history_update_total": 39100,
+      "protocol_manifest_hash_matches": true
+    },
+    {
+      "seed": 1,
+      "saved_seed_matches": true,
+      "epoch": 100,
+      "global_step": 39100,
+      "history_rows": 100,
+      "history_sample_total": 2000000,
+      "history_update_total": 39100,
+      "protocol_manifest_hash_matches": true
+    },
+    {
+      "seed": 2,
+      "saved_seed_matches": true,
+      "epoch": 100,
+      "global_step": 39100,
+      "history_rows": 100,
+      "history_sample_total": 2000000,
+      "history_update_total": 39100,
+      "protocol_manifest_hash_matches": true
+    }
+  ],
+  "original_checkpoint_bytes_preserved": true,
+  "checkpoints": [
+    {
+      "seed": 0,
+      "file": "seed0/epoch_0100.pt",
+      "bytes": 10998701
+    },
+    {
+      "seed": 1,
+      "file": "seed1/epoch_0100.pt",
+      "bytes": 11002861
+    },
+    {
+      "seed": 2,
+      "file": "seed2/epoch_0100.pt",
+      "bytes": 11002349
+    }
+  ],
+  "interpretation": "This publication verifies saved metadata and identity consistency; actual 42-frame GPU inference and single-frame reproduction were completed before publication."
+}

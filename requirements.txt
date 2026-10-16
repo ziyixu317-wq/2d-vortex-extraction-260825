@@ -1,0 +1,9 @@
+torch==2.7.1
+numpy
+scipy
+h5py
+PyYAML
+matplotlib
+scikit-image
+contourpy
+tqdm

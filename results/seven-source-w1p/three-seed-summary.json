@@ -1,0 +1,339 @@
+{
+  "scope": "seven-source bounded train/calibration development report",
+  "status": "complete",
+  "probability_threshold": 0.1,
+  "threshold_rule": "Ticket10 registered global calibration-only point; no source/seed retuning",
+  "replication": {
+    "W1-P": {
+      "status": "complete",
+      "available_seeds": [
+        0,
+        1,
+        2
+      ],
+      "missing_seeds": [],
+      "metrics": {
+        "old_six/train": {
+          "precision": {
+            "by_seed": {
+              "0": 0.962501848836505,
+              "1": 0.9680009167058269,
+              "2": 0.9624217313135338
+            },
+            "mean": 0.9643081656186219,
+            "sample_std": 0.003198267132122006
+          },
+          "recall": {
+            "by_seed": {
+              "0": 0.9800628888791713,
+              "1": 0.973474862693189,
+              "2": 0.9791154185853528
+            },
+            "mean": 0.9775510567192377,
+            "sample_std": 0.003561733186654152
+          },
+          "f1": {
+            "by_seed": {
+              "0": 0.9707010801679324,
+              "1": 0.970403629945613,
+              "2": 0.9702514689062807
+            },
+            "mean": 0.9704520596732754,
+            "sample_std": 0.00022868460932496518
+          },
+          "iou": {
+            "by_seed": {
+              "0": 0.9466536906019382,
+              "1": 0.9460873980189831,
+              "2": 0.9459951469485235
+            },
+            "mean": 0.9462454118564816,
+            "sample_std": 0.00035657567989689007
+          },
+          "auprc": {
+            "by_seed": {
+              "0": 0.9903313463427418,
+              "1": 0.991134614707244,
+              "2": 0.9903905882846386
+            },
+            "mean": 0.9906188497782081,
+            "sample_std": 0.0004476466222786104
+          }
+        },
+        "mfc/train": {
+          "precision": {
+            "by_seed": {
+              "0": 0.9853968253968254,
+              "1": 0.980367321089297,
+              "2": 0.9617520049352252
+            },
+            "mean": 0.9758387171404492,
+            "sample_std": 0.012455945325805955
+          },
+          "recall": {
+            "by_seed": {
+              "0": 0.9923273657289002,
+              "1": 0.989769820971867,
+              "2": 0.9968030690537084
+            },
+            "mean": 0.9929667519181585,
+            "sample_std": 0.0035599516386380877
+          },
+          "f1": {
+            "by_seed": {
+              "0": 0.9888499522140809,
+              "1": 0.9850461342666242,
+              "2": 0.9789638932496075
+            },
+            "mean": 0.9842866599101042,
+            "sample_std": 0.004986596177345792
+          },
+          "iou": {
+            "by_seed": {
+              "0": 0.9779458097038437,
+              "1": 0.9705329153605016,
+              "2": 0.9587945879458795
+            },
+            "mean": 0.9690911043367416,
+            "sample_std": 0.00965667841324633
+          },
+          "auprc": {
+            "by_seed": {
+              "0": 0.9991130572424135,
+              "1": 0.9988658905641956,
+              "2": 0.9993046841212947
+            },
+            "mean": 0.9990945439759679,
+            "sample_std": 0.00021998182246217468
+          }
+        },
+        "seven/train": {
+          "precision": {
+            "by_seed": {
+              "0": 0.9657725597736936,
+              "1": 0.9697675459034655,
+              "2": 0.9623260561166326
+            },
+            "mean": 0.9659553872645973,
+            "sample_std": 0.0037241122405826032
+          },
+          "recall": {
+            "by_seed": {
+              "0": 0.9818149570005611,
+              "1": 0.9758027138758573,
+              "2": 0.9816422257951178
+            },
+            "mean": 0.979753298890512,
+            "sample_std": 0.0034223968919230834
+          },
+          "f1": {
+            "by_seed": {
+              "0": 0.9732937761745252,
+              "1": 0.972495416277186,
+              "2": 0.9714961009553275
+            },
+            "mean": 0.9724284311356796,
+            "sample_std": 0.0009007076691781696
+          },
+          "iou": {
+            "by_seed": {
+              "0": 0.9511239933307818,
+              "1": 0.9495796147820572,
+              "2": 0.9478236385195744
+            },
+            "mean": 0.9495090822108044,
+            "sample_std": 0.001651307543333638
+          },
+          "auprc": {
+            "by_seed": {
+              "0": 0.9915858764712663,
+              "1": 0.9922390826868084,
+              "2": 0.991664030547018
+            },
+            "mean": 0.9918296632350309,
+            "sample_std": 0.0003567144943922056
+          }
+        },
+        "old_six/calibration": {
+          "precision": {
+            "by_seed": {
+              "0": 0.95789517301785,
+              "1": 0.9643261036943914,
+              "2": 0.952814612223826
+            },
+            "mean": 0.9583452963120225,
+            "sample_std": 0.005768931201201184
+          },
+          "recall": {
+            "by_seed": {
+              "0": 0.9643934733065932,
+              "1": 0.9552785801324752,
+              "2": 0.9679389809105494
+            },
+            "mean": 0.9625370114498727,
+            "sample_std": 0.006531177147686251
+          },
+          "f1": {
+            "by_seed": {
+              "0": 0.9598622402293295,
+              "1": 0.9586995051113507,
+              "2": 0.9587036471982002
+            },
+            "mean": 0.9590884641796268,
+            "sample_std": 0.0006701129162618892
+          },
+          "iou": {
+            "by_seed": {
+              "0": 0.9274489888253128,
+              "1": 0.9246711008834408,
+              "2": 0.9260392705684058
+            },
+            "mean": 0.9260531200923864,
+            "sample_std": 0.0013889957564316962
+          },
+          "auprc": {
+            "by_seed": {
+              "0": 0.9886870251241292,
+              "1": 0.9899957799044211,
+              "2": 0.9878906151541399
+            },
+            "mean": 0.9888578067275634,
+            "sample_std": 0.0010629225858501238
+          }
+        },
+        "mfc/calibration": {
+          "precision": {
+            "by_seed": {
+              "0": 0.9760213143872114,
+              "1": 0.9657444005270093,
+              "2": 0.9653052261747914
+            },
+            "mean": 0.9690236470296707,
+            "sample_std": 0.006064134716759227
+          },
+          "recall": {
+            "by_seed": {
+              "0": 0.9977303676804358,
+              "1": 0.9981842941443486,
+              "2": 0.9977303676804358
+            },
+            "mean": 0.99788167650174,
+            "sample_std": 0.0002620745661323766
+          },
+          "f1": {
+            "by_seed": {
+              "0": 0.9867564534231201,
+              "1": 0.9816964285714286,
+              "2": 0.98125
+            },
+            "mean": 0.983234293998183,
+            "sample_std": 0.0030584358548697115
+          },
+          "iou": {
+            "by_seed": {
+              "0": 0.973859105006646,
+              "1": 0.964050854888207,
+              "2": 0.9631901840490797
+            },
+            "mean": 0.9670333813146442,
+            "sample_std": 0.005926893496005845
+          },
+          "auprc": {
+            "by_seed": {
+              "0": 0.9993398168249614,
+              "1": 0.999168675800428,
+              "2": 0.9987906143405967
+            },
+            "mean": 0.9990997023219954,
+            "sample_std": 0.00028102285984137304
+          }
+        },
+        "seven/calibration": {
+          "precision": {
+            "by_seed": {
+              "0": 0.9604846217849017,
+              "1": 0.9645287175276225,
+              "2": 0.9545989856453926
+            },
+            "mean": 0.9598707749859723,
+            "sample_std": 0.004993245410818515
+          },
+          "recall": {
+            "by_seed": {
+              "0": 0.9691558867885707,
+              "1": 0.9614079678484571,
+              "2": 0.9721948933062475
+            },
+            "mean": 0.967586249314425,
+            "sample_std": 0.005562127430953345
+          },
+          "f1": {
+            "by_seed": {
+              "0": 0.9637042706855853,
+              "1": 0.9619847798913618,
+              "2": 0.9619245547413146
+            },
+            "mean": 0.9625378684394206,
+            "sample_std": 0.0010105827116412484
+          },
+          "iou": {
+            "by_seed": {
+              "0": 0.9340790054226461,
+              "1": 0.9302967800269789,
+              "2": 0.9313465439227879
+            },
+            "mean": 0.9319074431241376,
+            "sample_std": 0.0019525017724610467
+          },
+          "auprc": {
+            "by_seed": {
+              "0": 0.9902088525099624,
+              "1": 0.9913061936038507,
+              "2": 0.9894477578950623
+            },
+            "mean": 0.9903209346696252,
+            "sample_std": 0.0009342738510795285
+          }
+        }
+      }
+    }
+  },
+  "auprc_definition": "average precision: step-integral PR area with equal-score groups pooled",
+  "cross_criterion": {
+    "standard_ivd": "reported through P95/P80 operational segmentation reference",
+    "Qrotstrain": {
+      "status": "NA",
+      "reason": "no seven-source criterion audit supplied; historical six-source audit is a separate scope"
+    },
+    "lambda_ci": {
+      "status": "NA",
+      "reason": "no seven-source criterion audit supplied"
+    },
+    "Gamma1": {
+      "status": "NA",
+      "reason": "registered definition supplies no binary physical oracle"
+    },
+    "Gamma2": {
+      "status": "NA",
+      "reason": "no seven-source scale-sensitive audit supplied"
+    }
+  },
+  "haller": {
+    "status": "diagnostic_only",
+    "mfc_airfoil": {
+      "status": "NA",
+      "reason": "600-second integration timed out; no usable anchor available; unknown is not negative"
+    }
+  },
+  "selective": {
+    "status": "NA",
+    "reason": "W2 has no selected seven-source gate and accepted-set predictions in this run"
+  },
+  "old_final_test": "sealed",
+  "test_frame_indices_read": [],
+  "selected_method": "W1-P",
+  "display_checkpoint": "seed0/epoch_0100.pt",
+  "display_choice": "Observed highest seven-source calibration macro F1 and IoU among the three supplied seeds. Seed1 has higher AUPRC and worst-source F1; all three seeds are retained.",
+  "prediction_arrays_included": false,
+  "source_data_included": false
+}
